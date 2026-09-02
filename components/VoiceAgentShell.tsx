@@ -126,6 +126,7 @@ export const VoiceAgentShell: React.FC = () => {
   const autoSleepTimerRef = useRef<NodeJS.Timeout | null>(null);
   const returnToVoiceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
+  const isGreetingSpokenRef = useRef<boolean>(false);
 
   // Long-term memory notes: short durable facts the agent chose to remember
   // across turns (allergies, standing preferences, recurring requests).
@@ -950,6 +951,20 @@ export const VoiceAgentShell: React.FC = () => {
         speechSynthesizer.stop();
       }
       isContinuousModeRef.current = true;
+
+      // The greeting text is generated client-side on load, but nothing
+      // ever actually spoke it - tapping the mic showed a silent wall of
+      // text with no acknowledgement. Speak it now, on this first tap (a
+      // real user gesture, so autoplay/audio-unlock policies allow it);
+      // speak()'s own onEnd handler already starts listening afterward
+      // whenever continuous mode is on (set just above), so nothing else
+      // to trigger here.
+      if (conversation.length === 0 && !isGreetingSpokenRef.current) {
+        isGreetingSpokenRef.current = true;
+        speak(spokenReply);
+        return;
+      }
+
       try {
         recognition.current?.start();
         setVoiceState('listening');

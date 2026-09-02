@@ -1,6 +1,7 @@
 import path from 'path';
 import { defineConfig, Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 import { handleApiRequest } from './server/index.mjs';
 
 function apiServerPlugin(): Plugin {
@@ -26,6 +27,7 @@ export default defineConfig(() => {
       allowedHosts: true as true,
     },
     plugins: [
+      tailwindcss(),
       react(),
       apiServerPlugin(),
     ],
