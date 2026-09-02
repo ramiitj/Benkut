@@ -35,6 +35,7 @@ const load = (): FoodMemoryState => {
           hypotheses: Array.isArray(parsed.preferences.hypotheses) ? parsed.preferences.hypotheses : []
         }
       : { confirmed: [], hypotheses: [] };
+    const memoryNotes = Array.isArray(parsed?.memoryNotes) ? parsed.memoryNotes : [];
 
     return {
       pantryLots,
@@ -43,6 +44,7 @@ const load = (): FoodMemoryState => {
       shoppingList: shoppingItems,
       familyHabits,
       events,
+      memoryNotes,
       allergies,
       preferences
     };
@@ -171,6 +173,23 @@ class FoodMemoryService {
   getUserFoodProfile() {
     const s = load();
     return { allergies: s.allergies, preferences: s.preferences };
+  }
+
+  // Long-term memory notes (durable facts the agent chose to remember) -
+  // stored as part of the same unified state as everything else here, so
+  // they get the same Firestore sync/offline/cross-device behavior for
+  // free instead of a separate ad-hoc localStorage path.
+  getMemoryNotes(): string[] {
+    return load().memoryNotes || [];
+  }
+
+  addMemoryNote(note: string) {
+    if (!note) return;
+    const state = load();
+    const existing = state.memoryNotes || [];
+    if (existing.includes(note)) return;
+    state.memoryNotes = [...existing, note].slice(-12);
+    save(state);
   }
 
   getHouseholdContext() {

@@ -128,10 +128,6 @@ export const VoiceAgentShell: React.FC = () => {
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
   const isGreetingSpokenRef = useRef<boolean>(false);
 
-  // Long-term memory notes: short durable facts the agent chose to remember
-  // across turns (allergies, standing preferences, recurring requests).
-  const [sessionMemoryNotes, setSessionMemoryNotes] = useState<string[]>([]);
-
   // Core State
   const [voiceState, setVoiceState] = useState<VoiceState>('ready');
   const [transcript, setTranscript] = useState('');
@@ -320,30 +316,14 @@ export const VoiceAgentShell: React.FC = () => {
     }
   }, []);
 
-  // Load persisted long-term memory notes once we know who the user is
-  useEffect(() => {
-    if (!account?.uid) return;
-    try {
-      const raw = localStorage.getItem(`benkut_memory_notes_${account.uid}`);
-      if (raw) setSessionMemoryNotes(JSON.parse(raw));
-    } catch {
-      // ignore malformed/missing local storage
-    }
-  }, [account?.uid]);
-
+  // Long-term memory notes now live in foodMemoryService's unified state
+  // (domain/foodMemory.ts's memoryNotes field) instead of a separate
+  // localStorage-only path, so they get the same Firestore sync/offline/
+  // cross-device behavior as pantry/shopping/habits for free.
   const rememberNote = useCallback((note: string | null | undefined) => {
     if (!note) return;
-    setSessionMemoryNotes(prev => {
-      if (prev.includes(note)) return prev;
-      const next = [...prev, note].slice(-12);
-      try {
-        if (account?.uid) localStorage.setItem(`benkut_memory_notes_${account.uid}`, JSON.stringify(next));
-      } catch {
-        // ignore storage failures (private mode, quota)
-      }
-      return next;
-    });
-  }, [account?.uid]);
+    foodMemoryService.addMemoryNote(note);
+  }, []);
 
   // Audio unlock listener
   useEffect(() => {
@@ -767,7 +747,7 @@ export const VoiceAgentShell: React.FC = () => {
           prompt: clean,
           trigger: 'user',
           history: historyPayload,
-          historySummary: sessionMemoryNotes.join(' | '),
+          historySummary: (memoryState.memoryNotes || []).join(' | '),
           context: memoryState,
           environment,
           language,
@@ -795,7 +775,7 @@ export const VoiceAgentShell: React.FC = () => {
     } finally {
       isProcessingRef.current = false;
     }
-  }, [account, conversation, language, langInfo.bcp47, pendingAction, activeOverlay, showCameraModal, speak, isGuest, applyAgentResult, sessionMemoryNotes, environment, voiceGender]);
+  }, [account, conversation, language, langInfo.bcp47, pendingAction, activeOverlay, showCameraModal, speak, isGuest, applyAgentResult, environment, voiceGender]);
 
   // Proactive check-in: periodically (and when the tab regains focus) gives
   // the agent a silent turn - current kitchen state plus recent history,
@@ -825,7 +805,7 @@ export const VoiceAgentShell: React.FC = () => {
           prompt: '',
           trigger: 'proactive',
           history: historyPayload,
-          historySummary: sessionMemoryNotes.join(' | '),
+          historySummary: (memoryState.memoryNotes || []).join(' | '),
           context: memoryState,
           environment,
           language,
@@ -847,7 +827,7 @@ export const VoiceAgentShell: React.FC = () => {
     } finally {
       isProcessingRef.current = false;
     }
-  }, [voiceState, showCameraModal, showSettingsModal, showProfileModal, showAuthModal, showSaveModal, showTourModal, pendingAction, account, isGuest, conversation, environment, language, langInfo.bcp47, voiceGender, sessionMemoryNotes, applyAgentResult]);
+  }, [voiceState, showCameraModal, showSettingsModal, showProfileModal, showAuthModal, showSaveModal, showTourModal, pendingAction, account, isGuest, conversation, environment, language, langInfo.bcp47, voiceGender, applyAgentResult]);
 
   useEffect(() => {
     const interval = setInterval(() => { void runProactiveCheck(); }, PROACTIVE_CHECK_INTERVAL_MS);
@@ -1749,6 +1729,7 @@ export const VoiceAgentShell: React.FC = () => {
         environment={environment}
         onEnvironmentChange={handleSelectEnvironment}
         voiceCommand={transcript}
+        history={conversation.slice(-12).map(c => ({ role: c.role, text: c.text }))}
         onAnalysisComplete={(data: any) => {
           // Note: autoTabulatedItems is already applied inside
           // CameraInspectionModal itself (executeAutonomousTabulation) -

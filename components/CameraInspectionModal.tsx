@@ -47,6 +47,10 @@ interface CameraInspectionModalProps {
   environment?: CulinaryEnvironment;
   voiceCommand?: string;
   onEnvironmentChange?: (env: CulinaryEnvironment) => void;
+  /** Recent voice/text turns, so a camera-triggered analysis is aware of
+   * what was just discussed (e.g. "these tomatoes look wrinkled" said
+   * right before opening the camera) instead of starting from nothing. */
+  history?: { role: 'user' | 'assistant'; text: string }[];
 }
 
 export const CameraInspectionModal: React.FC<CameraInspectionModalProps> = ({
@@ -56,7 +60,8 @@ export const CameraInspectionModal: React.FC<CameraInspectionModalProps> = ({
   mode = 'auto',
   environment = 'countertop',
   voiceCommand,
-  onEnvironmentChange
+  onEnvironmentChange,
+  history
 }) => {
   const { t, language, langInfo } = useLanguage();
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -329,6 +334,8 @@ Provide a friendly, warm spoken response in ${language} (${langInfo.bcp47}).`;
           language,
           bcp47: langInfo.bcp47,
           environment,
+          history: (history || []).slice(-12),
+          historySummary: (memoryState?.memoryNotes || []).join(' | '),
           context: memoryState,
           voiceGender: speechSynthesizer.getVoiceGender(),
           image: { mimeType, data: base64Data }
@@ -368,7 +375,7 @@ Provide a friendly, warm spoken response in ${language} (${langInfo.bcp47}).`;
     } finally {
       setAnalyzing(false);
     }
-  }, [language, langInfo.bcp47, mode, environment, currentFacingMode, executeAutonomousTabulation, onAnalysisComplete, onClose]);
+  }, [language, langInfo.bcp47, mode, environment, currentFacingMode, executeAutonomousTabulation, onAnalysisComplete, onClose, history]);
 
   // Voice Command Listener inside Camera Modal
   useEffect(() => {

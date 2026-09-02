@@ -31,6 +31,10 @@ export interface FoodMemoryState {
   events: FoodEvent[];
   allergies: string[];
   preferences: { confirmed: string[]; hypotheses: string[] };
+  /** Short durable facts the agent chose to remember across turns (allergies,
+   * standing preferences, recurring requests) - synced to Firestore like the
+   * rest of this state, so they persist across devices once signed in. */
+  memoryNotes: string[];
 }
 
 export const defaultFamilyHabits = (): FamilyHabits => ({
@@ -51,7 +55,8 @@ export const emptyFoodMemory = (): FoodMemoryState => {
     familyHabits: defaultHabits,
     events: [],
     allergies: [],
-    preferences: { confirmed: [], hypotheses: [] }
+    preferences: { confirmed: [], hypotheses: [] },
+    memoryNotes: []
   };
 };
 export const usableQuantity = (lots: PantryLot[], product: string) => lots.filter(l => l.name.toLowerCase() === product.toLowerCase() && l.lotStatus === 'active' && l.freshnessStatus !== 'expired').reduce((n, l) => n + Math.max(0, l.remainingQuantity - l.reservedQuantity), 0);
