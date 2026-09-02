@@ -29,63 +29,45 @@ export const Governance: React.FC = () => {
   const registeredEvents = recentEvents.filter(e => !e.userId.startsWith('guest') && !e.userEmail?.includes('guest'));
 
   return (
-    <div className="h-full min-h-screen flex bg-stone-50 font-sans text-stone-900">
-      {/* Sidebar Navigation */}
-      <nav aria-label="Administration sections" className="w-64 bg-[#17231C] text-white p-5 hidden lg:block shrink-0">
-        <div className="flex items-center gap-2 mb-6">
-          <div className="w-8 h-8 rounded-xl bg-[#174F35] text-[#DFF36C] flex items-center justify-center font-bold">
-            <span className="material-symbols-outlined text-base">shield_person</span>
-          </div>
-          <div>
-            <p className="text-xs text-[#DFF36C] font-black tracking-wider">BENKUT ADMIN</p>
-            <p className="text-[10px] text-stone-400">Governance & Telemetry</p>
-          </div>
+    <div className="flex flex-col h-full bg-stone-50 font-sans text-stone-900">
+      {/* Header */}
+      <header className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4 border-b border-stone-200 bg-white px-6 sm:px-8 py-4 shadow-xs">
+        <div>
+          <p className="text-[#174F35] font-black text-xs tracking-widest uppercase">Governance & Telemetry</p>
+          <h1 className="text-xl sm:text-2xl font-black text-stone-900 mt-1">{section}</h1>
+          <p className="text-xs text-stone-500 mt-0.5">
+            Real-time operational metrics, anonymous guest activity tracking, and security audit logs.
+          </p>
         </div>
+        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold shrink-0">
+          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+          Live Telemetry Active
+        </span>
+      </header>
 
-        <div className="space-y-1">
-          {sections.map(s => (
-            <button
-              key={s}
-              onClick={() => setSection(s)}
-              className={`w-full text-left px-3 py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-between cursor-pointer ${
-                section === s ? 'bg-[#174F35] text-white shadow-sm' : 'text-stone-300 hover:bg-white/10'
-              }`}
-            >
-              <span>{s}</span>
-              {s === 'Users & Guest Sessions' && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-stone-700 text-stone-200">
-                  {recentEvents.length}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-
-        <div className="mt-8 p-3 rounded-2xl bg-white/5 border border-white/10 text-[11px] text-stone-400 leading-relaxed">
-          <span className="text-emerald-400 font-bold block mb-1">Privacy & Compliance</span>
-          Guest & anonymous user data is stored safely for system analytics & administrative governance. Personal identifiers are masked by default.
-        </div>
-      </nav>
+      {/* Section Tabs */}
+      <div className="flex border-b border-stone-200 bg-stone-50 overflow-x-auto px-4 sm:px-8 gap-1 shrink-0">
+        {sections.map(s => (
+          <button
+            key={s}
+            onClick={() => setSection(s)}
+            className={`flex items-center gap-2 px-4 py-3.5 text-xs font-bold border-b-2 transition whitespace-nowrap cursor-pointer ${
+              section === s ? 'border-[#174F35] text-[#174F35] bg-white' : 'border-transparent text-stone-500 hover:text-stone-900'
+            }`}
+          >
+            <span>{s}</span>
+            {s === 'Users & Guest Sessions' && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-stone-200 text-stone-700">
+                {recentEvents.length}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
 
       {/* Main Content Area */}
       <main className="flex-1 overflow-y-auto p-6 md:p-10">
         <div className="max-w-6xl mx-auto">
-          {/* Header */}
-          <header className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4 mb-8 pb-6 border-b border-stone-200">
-            <div>
-              <p className="text-[#174F35] font-black text-xs tracking-widest uppercase">Admin Dashboard</p>
-              <h1 className="text-2xl sm:text-3xl font-black text-stone-900 mt-1">{section}</h1>
-              <p className="text-xs sm:text-sm text-stone-500 mt-0.5">
-                Real-time operational metrics, anonymous guest activity tracking, and security audit logs.
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                Live Telemetry Active
-              </span>
-            </div>
-          </header>
 
           {/* Section 1: Overview */}
           {section === 'Overview' && (
@@ -124,6 +106,11 @@ export const Governance: React.FC = () => {
                     </div>
                   ))}
                 </div>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-100 text-xs text-emerald-900 leading-relaxed">
+                <span className="font-bold block mb-1">Privacy & Compliance</span>
+                Guest & anonymous user data is stored safely for system analytics & administrative governance. Personal identifiers are masked by default.
               </div>
             </div>
           )}
