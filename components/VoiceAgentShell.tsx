@@ -478,9 +478,13 @@ export const VoiceAgentShell: React.FC = () => {
 
     // Autonomous Item Auto-Tabulation when items are recognized
     if (Array.isArray((result as any).autoTabulatedItems) && (result as any).autoTabulatedItems.length > 0) {
-      const meta = mutationMeta('voice');
       for (const item of (result as any).autoTabulatedItems) {
         if (!item.name) continue;
+        // Each item needs its own idempotency key - mutationMeta('voice')
+        // mints a fresh crypto.randomUUID() per call. Reusing a single meta
+        // across this loop previously made every item after the first look
+        // like a duplicate of the same mutation and get silently dropped.
+        const meta = mutationMeta('voice');
         if (item.target === 'shopping') {
           foodMemoryService.addShoppingListItem(meta, {
             id: crypto.randomUUID(),

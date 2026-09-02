@@ -63,6 +63,47 @@ function getAIClient() {
   return aiClient;
 }
 
+// Gemini occasionally emits multi-line string values (e.g. a markdown
+// workspace.body) with literal newline/tab characters instead of \n/\t
+// escapes. That's invalid per the JSON spec and throws "Bad control
+// character in string literal" - confirmed live for a tacos/pantry
+// cross-reference reply whose workspace.body had raw newlines. Walk the
+// text tracking string-literal boundaries and escape control characters
+// only inside strings, leaving structural whitespace untouched.
+function escapeControlCharsInStrings(str) {
+  let result = '';
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (inString) {
+      if (escaped) {
+        result += ch;
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\') {
+        result += ch;
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        result += ch;
+        inString = false;
+        continue;
+      }
+      if (ch === '\n') { result += '\\n'; continue; }
+      if (ch === '\r') { result += '\\r'; continue; }
+      if (ch === '\t') { result += '\\t'; continue; }
+      result += ch;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    result += ch;
+  }
+  return result;
+}
+
 const cleanJson = (text) => {
   if (!text) {
     // An empty response from the provider is almost always its own safety
@@ -99,19 +140,24 @@ const cleanJson = (text) => {
     return JSON.parse(match[0]);
   } catch (err) {
     console.error('Failed to parse Gemini JSON:', err.message, 'Raw text:', text);
-    let aggressive = match[0].replace(/,\s*([}\]])/g, '$1'); 
+    let aggressive = match[0].replace(/,\s*([}\]])/g, '$1');
     try {
       return JSON.parse(aggressive);
     } catch (err2) {
        console.error('Aggressive fallback failed:', err2.message);
-       return {
-         speech: 'I understand what you mean. Let me know how you would like to proceed in your kitchen.',
-         intent: 'general',
-         workspace: {
-           title: 'Kitchen Companion',
-           body: text.replace(/[{}[\]"]/g, '').trim() || 'Ready for next step.'
-         }
-       };
+       try {
+         return JSON.parse(escapeControlCharsInStrings(aggressive));
+       } catch (err3) {
+         console.error('Control-character repair failed:', err3.message);
+         return {
+           speech: 'I understand what you mean. Let me know how you would like to proceed in your kitchen.',
+           intent: 'general',
+           workspace: {
+             title: 'Kitchen Companion',
+             body: text.replace(/[{}[\]"]/g, '').trim() || 'Ready for next step.'
+           }
+         };
+       }
     }
   }
 };
@@ -243,7 +289,19 @@ export const generateAgentTurn = async ({ prompt, history = [], context = {}, en
       systemInstruction: systemInstructionText,
       responseMimeType: 'application/json',
       temperature: config.temperature ?? 0.2,
-      maxOutputTokens: config.maxOutputTokens ?? 1400
+      // A rich cross-domain turn (markdown workspace.body plus the same
+      // item list independently duplicated across workspace.data,
+      // action.payload, and autoTabulatedItems per the schema) can run well
+      // past 1400 tokens and get cut off mid-JSON - confirmed live on a
+      // "what am I missing for tacos" turn, where truncation broke JSON
+      // parsing entirely and lost the whole structured response. Raising
+      // this alone didn't fix it: gemini-3.7-flash spends part of the same
+      // output budget on invisible "thinking" tokens before any JSON text,
+      // so thinkingBudget: 0 below is what actually stops the truncation -
+      // this agent needs fast, deterministic structured output for a
+      // real-time voice UX, not open-ended reasoning.
+      maxOutputTokens: config.maxOutputTokens ?? 2600,
+      thinkingConfig: { thinkingBudget: 0 }
     }
   });
 
