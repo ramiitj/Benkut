@@ -169,7 +169,7 @@ const AgentConfig: React.FC = () => {
     { key: 'habits', label: '1. Food Habits', icon: 'favorite', color: 'text-rose-600' },
     { key: 'pantry', label: '2. Pantry Guard', icon: 'kitchen', color: 'text-emerald-600' },
     { key: 'shopping', label: '3. Fresh Shopping', icon: 'shopping_bag', color: 'text-amber-600' },
-    { key: 'chef', label: '4. Live Sous-Chef', icon: 'skillet', color: 'text-[#174F35]' },
+    { key: 'chef', label: '4. Live Cooking Coach', icon: 'skillet', color: 'text-[#174F35]' },
     { key: 'all', label: 'All Prompts View', icon: 'view_agenda', color: 'text-blue-600' },
     { key: 'config', label: 'Model Parameters', icon: 'settings', color: 'text-stone-600' }
   ];
@@ -376,7 +376,7 @@ const AgentConfig: React.FC = () => {
                 onChange={(e) => setTestSpecialist(e.target.value as typeof testSpecialist)}
                 className="text-[11px] font-bold bg-[#E8F1E9] text-[#174F35] border border-[#174F35]/20 rounded-lg px-2 py-1 focus:outline-none"
               >
-                <option value="chef">Test: Sous-Chef</option>
+                <option value="chef">Test: Cooking Coach</option>
                 <option value="habits">Test: Habits</option>
                 <option value="pantry">Test: Pantry Guard</option>
                 <option value="shopping">Test: Shopping / Inspection</option>

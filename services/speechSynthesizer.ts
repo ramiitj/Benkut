@@ -214,7 +214,12 @@ class GeminiAudioSynthesizer {
       return this.playGeminiAudio(options.audioData, options.sampleRate || 24000, options);
     }
 
-    // Otherwise request TTS from Gemini 24kHz PCM server endpoint
+    // Otherwise request TTS from Gemini 24kHz PCM server endpoint. No
+    // fallback to a different voice engine on failure: silently swapping
+    // to the browser's own (differently-voiced, differently-paced) speech
+    // synthesis masked real failures and gave the user an inconsistent,
+    // unannounced voice change. Surface the failure instead so the caller
+    // can tell the user plainly that voice output didn't work this time.
     try {
       this.unlockAudio();
       const res = await fetch('/api/agent/tts', {
@@ -234,34 +239,10 @@ class GeminiAudioSynthesizer {
           return this.playGeminiAudio(data.audioData, data.sampleRate || 24000, options);
         }
       }
+      options.onError?.(new Error(`TTS request failed: ${res.status}`));
     } catch (err) {
       console.warn('Gemini TTS fetch notice:', err);
-    }
-
-    // Fallback: browser speech if Gemini Audio stream unavailable
-    this.fallbackBrowserSpeak(cleanText, options);
-  }
-
-  private fallbackBrowserSpeak(text: string, options: GeminiAudioOptions = {}) {
-    if (this.isMuted || typeof window === 'undefined' || !('speechSynthesis' in window)) return;
-    try {
-      this.killBrowserSpeechSynthesis();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.onstart = () => {
-        this.isSpeaking = true;
-        options.onStart?.();
-      };
-      utterance.onend = () => {
-        this.isSpeaking = false;
-        options.onEnd?.();
-      };
-      utterance.onerror = (e) => {
-        this.isSpeaking = false;
-        options.onError?.(e);
-      };
-      window.speechSynthesis.speak(utterance);
-    } catch (e) {
-      console.warn('Browser speech fallback notice:', e);
+      options.onError?.(err);
     }
   }
 

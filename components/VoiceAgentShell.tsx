@@ -22,7 +22,7 @@ import {
 
 const PROACTIVE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
 
-type VoiceState = 'ready' | 'requesting' | 'listening' | 'understanding' | 'speaking' | 'paused' | 'unavailable' | 'error';
+type VoiceState = 'ready' | 'requesting' | 'listening' | 'understanding' | 'speaking' | 'paused' | 'unavailable' | 'error' | 'voiceUnavailable';
 type OverlayView = 'pantry' | 'shopping' | 'cook' | null;
 
 type ConversationTurn = {
@@ -33,7 +33,7 @@ type ConversationTurn = {
 };
 
 type AgentAction = {
-  type: 'log_meal' | 'add_pantry' | 'update_pantry' | 'add_shopping' | 'update_habit' | 'produce_inspection';
+  type: 'log_meal' | 'add_pantry' | 'update_pantry' | 'remove_pantry' | 'add_shopping' | 'remove_shopping' | 'update_habit' | 'produce_inspection' | 'auto_tabulate';
   label: string;
   payload: Record<string, unknown>;
 };
@@ -112,11 +112,12 @@ export const VoiceAgentShell: React.FC = () => {
     ready: { label: t('voiceReady') || 'Ready on Countertop', sub: t('tapToSpeak') || 'Tap to speak' },
     requesting: { label: t('connecting') || 'Connecting...', sub: t('preparingVoice') || 'Preparing culinary assistant' },
     listening: { label: t('listening') || 'Listening hands-free...', sub: t('listeningHandsFree') || 'Listening hands-free' },
-    understanding: { label: t('thinking') || 'Consulting sous-chef...', sub: t('statusCalibratingCooking') || 'Analyzing kitchen context...' },
+    understanding: { label: t('thinking') || 'Consulting your cooking coach...', sub: t('statusCalibratingCooking') || 'Analyzing kitchen context...' },
     speaking: { label: t('speaking') || 'Speaking...', sub: t('agentSpeaking') || 'Benkut speaking' },
     paused: { label: t('paused') || 'Paused', sub: t('tapToResume') || 'Tap to resume' },
     unavailable: { label: t('micUnavailable') || 'Mic unavailable', sub: t('enableMic') || 'Enable microphone permissions' },
     error: { label: t('couldNotHear') || 'Could not hear', sub: t('tapToRetry') || 'Tap to try again' },
+    voiceUnavailable: { label: t('voiceUnavailableLabel') || 'Voice unavailable', sub: t('voiceUnavailableSub') || 'Reading the reply below instead' },
   };
 
   const recognition = useRef<RecognitionLike | null>(null);
@@ -127,6 +128,7 @@ export const VoiceAgentShell: React.FC = () => {
   const returnToVoiceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
   const isGreetingSpokenRef = useRef<boolean>(false);
+  const lastSyncIssueNoticeRef = useRef<number>(0);
 
   // Core State
   const [voiceState, setVoiceState] = useState<VoiceState>('ready');
@@ -152,14 +154,8 @@ export const VoiceAgentShell: React.FC = () => {
     return init.suggestedActions;
   });
   
-  // Inline Produce Editing State
-  const [isEditingProduce, setIsEditingProduce] = useState(false);
-  const [editProduceName, setEditProduceName] = useState('');
-  const [editProduceQuantity, setEditProduceQuantity] = useState('1');
-
   // Contextual Visual Overlay (ONLY when active)
   const [activeOverlay, setActiveOverlay] = useState<OverlayView>(null);
-  const [newItemName, setNewItemName] = useState('');
   const [timerSeconds, setTimerSeconds] = useState<number | null>(null);
   const [timerActive, setTimerActive] = useState(false);
 
@@ -424,14 +420,146 @@ export const VoiceAgentShell: React.FC = () => {
         }
       },
       onError: () => {
-        if (isContinuousModeRef.current) {
-          resumeListening();
-        } else {
-          setVoiceState('ready');
-        }
+        // Voice output genuinely failed - say so instead of quietly
+        // reverting to "ready" as if nothing happened (the previous
+        // behavior silently fell back to a different, jarring browser
+        // voice instead; that fallback is gone, so this is now the only
+        // signal the user gets that audio didn't play).
+        setVoiceState('voiceUnavailable');
+        setTimeout(() => {
+          if (isContinuousModeRef.current) {
+            resumeListening();
+          } else {
+            setVoiceState('ready');
+          }
+        }, 1800);
       }
     });
   }, [isMuted, voiceGender, langInfo.bcp47, resetAutoSleepTimer, resumeListening]);
+
+  // Tell the user, in the agent's own voice, when a save didn't actually
+  // succeed - foodMemoryService used to only console.warn this, so a
+  // failed local save (data genuinely lost) or a failed cloud sync (safe
+  // locally, just not backed up yet) looked identical to success. Throttle
+  // so a burst of failed writes doesn't interrupt with the same notice
+  // repeatedly.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ scope: 'local' | 'cloud'; message: string }>).detail;
+      if (!detail) return;
+      const now = Date.now();
+      if (now - lastSyncIssueNoticeRef.current < 60000) return;
+      lastSyncIssueNoticeRef.current = now;
+      const notice = detail.scope === 'local'
+        ? "I couldn't save that change on this device just now - please try again in a moment."
+        : "I saved that on this device, but couldn't back it up to your account just now. I'll keep trying.";
+      setConversation(turns => [
+        ...turns,
+        { id: crypto.randomUUID(), role: 'assistant', text: notice, timestamp: new Date().toLocaleTimeString() }
+      ]);
+      if (voiceState !== 'speaking' && voiceState !== 'listening') {
+        speak(notice);
+      }
+    };
+    window.addEventListener('benkut-sync-issue', handler);
+    return () => window.removeEventListener('benkut-sync-issue', handler);
+  }, [speak, voiceState]);
+
+  // Speak the greeting as soon as we have an authenticated account, instead
+  // of leaving it as a silent wall of text until the user taps the mic.
+  // This still respects browser autoplay gating: reaching this screen with
+  // an account always follows a real click (sign-in submit, or an existing
+  // session's landing-page navigation), so the page has already had a user
+  // gesture by the time this fires.
+  useEffect(() => {
+    if (account && conversation.length === 0 && !isGreetingSpokenRef.current) {
+      isGreetingSpokenRef.current = true;
+      speak(spokenReply);
+    }
+  }, [account, conversation.length, spokenReply, speak]);
+
+  // Actually perform an agent-issued action against the pantry/shopping
+  // store, and describe exactly what happened. Shared by two callers: an
+  // action the model marks confirmationRequired (applied only after the
+  // user says "yes", from the pending-action handler below) and an action
+  // the model decides to apply immediately (from applyAgentResult) - found
+  // via live testing that the latter case had NO handler at all, so the
+  // model's own "I've removed the tomatoes" narration was a false claim:
+  // nothing was actually removed, because result.action was only ever
+  // consumed when confirmationRequired was also true.
+  const executeAgentAction = (action: AgentAction): string => {
+    const meta = mutationMeta('voice');
+    const p = (action.payload || {}) as Record<string, unknown>;
+    const targetName = String(p.name || '').trim();
+
+    if (action.type === 'add_pantry') {
+      const name = targetName || 'Ingredient';
+      foodMemoryService.addPantryLot(meta, {
+        productId: name.toLowerCase().replace(/\W/g, '-'),
+        name,
+        category: String(p.category || 'produce'),
+        quantity: Number(p.quantity) || 1,
+        reservedQuantity: 0,
+        unit: 'each',
+        storageLocation: 'refrigerator',
+        freshnessStatus: 'fresh',
+        freshnessConfidence: 0.9,
+        freshnessEvidence: ['Voice confirmed']
+      });
+      setActiveOverlay('pantry');
+      refreshMemory();
+      return `Added ${name} to your pantry.`;
+    }
+
+    if (action.type === 'add_shopping') {
+      const name = targetName || 'Produce item';
+      foodMemoryService.addShoppingListItem(meta, {
+        id: crypto.randomUUID(),
+        name,
+        reason: 'meal-plan',
+        desiredQuantity: Number(p.quantity) || 1,
+        availableQuantity: 0,
+        missingQuantity: Number(p.quantity) || 1,
+        unit: 'each',
+        status: 'needed'
+      });
+      setActiveOverlay('shopping');
+      refreshMemory();
+      return `Added ${name} to your shopping list.`;
+    }
+
+    if (action.type === 'remove_pantry' || action.type === 'update_pantry') {
+      // Read fresh from the store rather than a render-scoped const, which
+      // this could otherwise close over and see a stale snapshot from an
+      // earlier render.
+      const freshLots = foodMemoryService.getState()?.pantryLots?.filter(l => l.remainingQuantity > 0) || [];
+      const lot = freshLots.find(l => l.name.toLowerCase() === targetName.toLowerCase())
+        || freshLots.find(l => l.name.toLowerCase().includes(targetName.toLowerCase()));
+      if (lot && targetName) {
+        const qty = Number(p.quantity) || lot.remainingQuantity;
+        foodMemoryService.consumePantryLot(meta, lot.id, qty);
+        setActiveOverlay('pantry');
+        refreshMemory();
+        return `Removed ${lot.name} from your pantry.`;
+      }
+      return `I couldn't find ${targetName || 'that item'} in your pantry to remove.`;
+    }
+
+    if (action.type === 'remove_shopping') {
+      const freshList = foodMemoryService.getState()?.shoppingList?.filter(i => i.status !== 'purchased') || [];
+      const item = freshList.find(i => i.name.toLowerCase() === targetName.toLowerCase())
+        || freshList.find(i => i.name.toLowerCase().includes(targetName.toLowerCase()));
+      if (item && targetName) {
+        foodMemoryService.markShoppingItemPurchased(meta, item.id);
+        setActiveOverlay('shopping');
+        refreshMemory();
+        return `Marked ${item.name} as bought.`;
+      }
+      return `I couldn't find ${targetName || 'that item'} on your shopping list.`;
+    }
+
+    return "I don't yet support completing that action automatically - tell me what you'd like changed and I'll help another way.";
+  };
 
   // Applies one agent response to app state - shared by user-triggered turns
   // and silent proactive check-ins. `userTurnText` is the text to log as the
@@ -472,8 +600,6 @@ export const VoiceAgentShell: React.FC = () => {
 
     if (result.produceAnalysis) {
       setProduceCard(result.produceAnalysis);
-      setEditProduceName(result.produceAnalysis.name);
-      setEditProduceQuantity('1');
     }
 
     // Autonomous Item Auto-Tabulation when items are recognized
@@ -530,8 +656,21 @@ export const VoiceAgentShell: React.FC = () => {
       });
     }
 
-    if (result.action && result.confirmationRequired) {
-      setPendingAction(result.action);
+    if (result.action) {
+      if (result.confirmationRequired) {
+        setPendingAction(result.action);
+      } else if (result.action.type !== 'add_pantry' && result.action.type !== 'add_shopping') {
+        // The model chose to act decisively rather than ask first (its
+        // own call, per the master prompt's "supportive actions... act
+        // decisively" guidance) and its speech above already narrates the
+        // change as done - so this must actually happen, or that
+        // narration becomes a false claim. add_pantry/add_shopping are
+        // excluded here because the model reliably signals a confident,
+        // no-confirmation add via autoTabulatedItems (handled above) -
+        // found live that the model sometimes sets BOTH for the same
+        // single add, and applying action too would double-add the item.
+        executeAgentAction(result.action);
+      }
     }
 
     if (result.returnToVoiceAfter) {
@@ -643,59 +782,15 @@ export const VoiceAgentShell: React.FC = () => {
 
     // 5. Pending Action Confirmations (or voice confirmation for produce add)
     if (pendingAction && /^(yes|confirm|do it|save|yeah|yep|sure|ok|okay|sí|si|हाँ|हां|haan|ha|అవును|add to pantry)$/i.test(clean)) {
-      const meta = mutationMeta('voice');
-      // Only these two action types are actually implemented below. Found
-      // via live testing: a confirmed action of any other type (e.g. the
-      // "clear my pantry" flow, which legitimately requires confirmation)
-      // fell through both branches doing nothing, while the code still
-      // told the user "Confirmed and saved" - claiming success for an
-      // action that never happened. Track whether something real occurred
-      // and only claim it did when it actually did.
-      let handled = true;
-      if (pendingAction.type === 'add_pantry') {
-        const p = pendingAction.payload;
-        foodMemoryService.addPantryLot(meta, {
-          productId: String(p.name || 'item').toLowerCase().replace(/\W/g, '-'),
-          name: String(p.name || 'Ingredient'),
-          category: String(p.category || 'produce'),
-          quantity: Number(p.quantity) || 1,
-          reservedQuantity: 0,
-          unit: 'each',
-          storageLocation: 'refrigerator',
-          freshnessStatus: 'fresh',
-          freshnessConfidence: 0.9,
-          freshnessEvidence: ['Voice confirmed']
-        });
-        setActiveOverlay('pantry');
-      } else if (pendingAction.type === 'add_shopping') {
-        const p = pendingAction.payload;
-        foodMemoryService.addShoppingListItem(meta, {
-          id: crypto.randomUUID(),
-          name: String(p.name || 'Produce item'),
-          reason: 'meal-plan',
-          desiredQuantity: Number(p.quantity) || 1,
-          availableQuantity: 0,
-          missingQuantity: Number(p.quantity) || 1,
-          unit: 'each',
-          status: 'needed'
-        });
-        setActiveOverlay('shopping');
-      } else {
-        handled = false;
-      }
-
-      refreshMemory();
+      const replyText = executeAgentAction(pendingAction);
       setPendingAction(null);
-      const replyText = handled
-        ? 'Confirmed and saved to your kitchen.'
-        : "I don't yet support completing that action automatically - please make that change directly on the Pantry or Shopping screen.";
       setConversation(turns => [
         ...turns,
         { id: crypto.randomUUID(), role: 'user', text: clean, timestamp: new Date().toLocaleTimeString() },
         { id: crypto.randomUUID(), role: 'assistant', text: replyText, timestamp: new Date().toLocaleTimeString() }
       ]);
       isProcessingRef.current = false;
-      speak(handled ? 'Confirmed. I have saved that to your kitchen.' : replyText);
+      speak(replyText);
       return;
     }
 
@@ -949,19 +1044,6 @@ export const VoiceAgentShell: React.FC = () => {
       }
       isContinuousModeRef.current = true;
 
-      // The greeting text is generated client-side on load, but nothing
-      // ever actually spoke it - tapping the mic showed a silent wall of
-      // text with no acknowledgement. Speak it now, on this first tap (a
-      // real user gesture, so autoplay/audio-unlock policies allow it);
-      // speak()'s own onEnd handler already starts listening afterward
-      // whenever continuous mode is on (set just above), so nothing else
-      // to trigger here.
-      if (conversation.length === 0 && !isGreetingSpokenRef.current) {
-        isGreetingSpokenRef.current = true;
-        speak(spokenReply);
-        return;
-      }
-
       try {
         recognition.current?.start();
         setVoiceState('listening');
@@ -1003,7 +1085,6 @@ export const VoiceAgentShell: React.FC = () => {
     });
     refreshMemory();
     setProduceCard(null);
-    setIsEditingProduce(false);
     speak(`Saved ${quantity} ${name} to your pantry.`);
   };
 
@@ -1073,8 +1154,8 @@ export const VoiceAgentShell: React.FC = () => {
                   : 'bg-white text-stone-600 border-stone-200'
               }`}
             >
-              <span className={`w-1.5 h-1.5 rounded-full ${isLiveListening ? 'bg-emerald-600 animate-ping' : isSpeaking ? 'bg-amber-600 animate-pulse' : isThinking ? 'bg-emerald-600 animate-pulse' : 'bg-[#174F35]'}`} />
-              <span className="truncate max-w-[100px] sm:max-w-none">{stateLabels[voiceState].label}</span>
+              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isLiveListening ? 'bg-emerald-600 animate-ping' : isSpeaking ? 'bg-amber-600 animate-pulse' : isThinking ? 'bg-emerald-600 animate-pulse' : 'bg-[#174F35]'}`} />
+              <span className="truncate max-w-[140px] sm:max-w-none" title={stateLabels[voiceState].label}>{stateLabels[voiceState].label}</span>
             </div>
           </div>
         </div>
@@ -1124,7 +1205,12 @@ export const VoiceAgentShell: React.FC = () => {
         id="voice-main-cockpit"
         className="flex-1 overflow-y-auto w-full max-w-2xl mx-auto px-4 sm:px-6 pt-3 pb-24 text-center overscroll-contain flex flex-col items-center"
       >
-        
+
+        {/* Voice control stays pinned to the top of this scrollable area
+            (sticky, not part of the normal flow) so a tall overlay or
+            response card below can never scroll it out of view - the user
+            must always be able to see and reach the agent's mic. */}
+        <div id="voice-control-sticky-header" className="sticky top-0 z-20 w-full bg-[#F5F7F3] pb-1">
         {/* Interactive Environmental & Location Context Bar */}
         <div id="environmental-context-bar" className="relative w-full max-w-lg mx-auto mb-2 flex items-center justify-center">
           <button
@@ -1225,8 +1311,11 @@ export const VoiceAgentShell: React.FC = () => {
             <span className="material-symbols-outlined text-3xl mb-0.5">
               {isSpeaking ? 'volume_up' : isThinking ? 'psychology' : isLiveListening ? 'graphic_eq' : 'mic'}
             </span>
-            <span className="text-[9px] sm:text-[10px] font-extrabold uppercase tracking-wider">
-              {isLiveListening ? (t('listening') || 'Listening') : isSpeaking ? (t('speaking') || 'Speaking') : isThinking ? (t('thinking') || 'Thinking') : (t('tapToSpeak') || 'Tap to Speak')}
+            {/* Short, single-word forms only - the small circle has no
+                room for the longer status sentences shown in the header
+                pill below without overflowing or clipping mid-word. */}
+            <span className="text-[9px] sm:text-[10px] font-extrabold uppercase tracking-wider px-1 text-center leading-tight">
+              {isLiveListening ? (t('orbListening') || 'Listening') : isSpeaking ? (t('orbSpeaking') || 'Speaking') : isThinking ? (t('orbThinking') || 'Thinking') : (t('orbTapToSpeak') || 'Speak')}
             </span>
           </button>
         </div>
@@ -1242,6 +1331,7 @@ export const VoiceAgentShell: React.FC = () => {
               Tap the green orb to speak hands-free or type below
             </p>
           )}
+        </div>
         </div>
 
         {/* Scrollback Chat Log - every turn except the current exchange,
@@ -1303,12 +1393,12 @@ export const VoiceAgentShell: React.FC = () => {
           {/* Contextual Visual Produce Insight Card with Edit & Redo */}
           {produceCard && (
             <div id="voice-produce-insight-card" className="rounded-2xl border border-emerald-200 bg-emerald-50/80 p-3.5 space-y-2.5 animate-fade-in text-xs text-stone-800">
-              <div className="flex items-center justify-between">
-                <span className="font-display font-black text-sm text-emerald-950 flex items-center gap-1.5">
-                  <span className="material-symbols-outlined text-emerald-700 text-base">eco</span>
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-display font-black text-sm text-emerald-950 flex items-center gap-1.5 min-w-0 break-words">
+                  <span className="material-symbols-outlined text-emerald-700 text-base shrink-0">eco</span>
                   {produceCard.name}
                 </span>
-                <span className="rounded-full bg-[#174F35] px-2.5 py-0.5 text-[10px] font-extrabold text-white shadow-2xs">
+                <span className="rounded-full bg-[#174F35] px-2.5 py-0.5 text-[10px] font-extrabold text-white shadow-2xs shrink-0">
                   {produceCard.freshnessScore}% Fresh · {produceCard.ripeness.toUpperCase()}
                 </span>
               </div>
@@ -1332,81 +1422,36 @@ export const VoiceAgentShell: React.FC = () => {
                 </div>
               )}
 
-              {/* Edit Mode Panel */}
-              {isEditingProduce ? (
-                <div className="p-2.5 bg-white rounded-xl border border-emerald-300 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={editProduceName}
-                      onChange={e => setEditProduceName(e.target.value)}
-                      placeholder="Item name"
-                      className="flex-1 text-xs bg-stone-50 border border-stone-200 rounded-lg px-2.5 py-1.5 text-stone-900"
-                    />
-                    <input
-                      type="number"
-                      min="1"
-                      value={editProduceQuantity}
-                      onChange={e => setEditProduceQuantity(e.target.value)}
-                      className="w-14 text-xs bg-stone-50 border border-stone-200 rounded-lg px-2 py-1.5 text-stone-900 text-center"
-                    />
-                  </div>
-                  <div className="flex items-center justify-end gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setIsEditingProduce(false)}
-                      className="px-2.5 py-1 text-[11px] font-bold text-stone-500 hover:text-stone-800"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSaveProduceToPantry(editProduceName, Number(editProduceQuantity) || 1)}
-                      className="px-3 py-1 bg-[#174F35] text-white text-[11px] font-bold rounded-lg hover:bg-[#0E3826]"
-                    >
-                      Save to Pantry
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                /* Interactive Action Strip */
-                <div className="flex items-center gap-1.5 pt-1">
-                  <button
-                    id="produce-confirm-add-btn"
-                    type="button"
-                    onClick={() => handleSaveProduceToPantry(produceCard.name, 1)}
-                    className="flex-1 py-2 px-3 rounded-xl bg-[#174F35] text-white text-xs font-bold hover:bg-[#0E3826] transition flex items-center justify-center gap-1 cursor-pointer"
-                  >
-                    <span className="material-symbols-outlined text-sm">add_task</span>
-                    <span>Add to Pantry</span>
-                  </button>
+              {/* Correcting the name/quantity used to mean tapping "Edit"
+                  to retype it into a form - the same manual-entry pattern
+                  as the removed pantry quick-add field. To correct what
+                  the camera detected, just say the correction ("actually
+                  it's 3 avocados") and the agent updates it. */}
+              <div className="flex items-center gap-1.5 pt-1">
+                <button
+                  id="produce-confirm-add-btn"
+                  type="button"
+                  onClick={() => handleSaveProduceToPantry(produceCard.name, 1)}
+                  className="flex-1 py-2 px-3 rounded-xl bg-[#174F35] text-white text-xs font-bold hover:bg-[#0E3826] transition flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-sm">add_task</span>
+                  <span>Add to Pantry</span>
+                </button>
 
-                  <button
-                    id="produce-edit-btn"
-                    type="button"
-                    onClick={() => setIsEditingProduce(true)}
-                    className="py-2 px-3 rounded-xl bg-white border border-emerald-300 text-emerald-950 text-xs font-bold hover:bg-emerald-100/60 transition flex items-center gap-1 cursor-pointer"
-                    title="Edit quantity or name"
-                  >
-                    <span className="material-symbols-outlined text-sm">edit</span>
-                    <span>Edit</span>
-                  </button>
-
-                  <button
-                    id="produce-rescan-btn"
-                    type="button"
-                    onClick={() => {
-                      setProduceCard(null);
-                      setShowCameraModal(true);
-                    }}
-                    className="py-2 px-2.5 rounded-xl bg-white border border-stone-200 text-stone-600 text-xs font-bold hover:bg-stone-100 transition flex items-center gap-1 cursor-pointer"
-                    title="Redo photo scan"
-                  >
-                    <span className="material-symbols-outlined text-sm">refresh</span>
-                    <span>Redo</span>
-                  </button>
-                </div>
-              )}
+                <button
+                  id="produce-rescan-btn"
+                  type="button"
+                  onClick={() => {
+                    setProduceCard(null);
+                    setShowCameraModal(true);
+                  }}
+                  className="py-2 px-2.5 rounded-xl bg-white border border-stone-200 text-stone-600 text-xs font-bold hover:bg-stone-100 transition flex items-center gap-1 cursor-pointer"
+                  title="Redo photo scan"
+                >
+                  <span className="material-symbols-outlined text-sm">refresh</span>
+                  <span>Redo</span>
+                </button>
+              </div>
             </div>
           )}
 
@@ -1414,8 +1459,8 @@ export const VoiceAgentShell: React.FC = () => {
           {workspaceResult && (
             <div id="voice-workspace-result-card" className="rounded-2xl border border-stone-200 bg-stone-50/90 p-4 space-y-2 animate-fade-in text-xs text-stone-800 shadow-2xs">
               <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-[#174F35]"></span>
-                <h4 className="font-bold text-stone-900 text-xs tracking-tight">{workspaceResult.title}</h4>
+                <span className="w-2 h-2 rounded-full bg-[#174F35] shrink-0"></span>
+                <h4 className="font-bold text-stone-900 text-xs tracking-tight break-words min-w-0">{workspaceResult.title}</h4>
               </div>
               <MarkdownRenderer content={workspaceResult.body} />
             </div>
@@ -1474,6 +1519,13 @@ export const VoiceAgentShell: React.FC = () => {
         </div>
 
         {/* 3. Dynamic Visual Overlays ONLY when user explicitly asks for them or modifies items */}
+        {/* Pantry/Shopping overlays are read-only mirrors of the agent's
+            own memory - every addition, removal, or "used"/"bought" mark
+            happens by talking to the agent (voice or the command bar), so
+            it can narrate what changed. A separate manual add-field and
+            one-tap buttons here let the UI silently diverge from what the
+            agent believes is true and gave the app two disconnected ways
+            to edit the same data. */}
         {activeOverlay === 'pantry' && (
           <div id="overlay-pantry-container" className="w-full max-w-lg bg-white rounded-3xl p-4 shadow-lg border border-emerald-200 text-left animate-fade-in mt-3 space-y-2.5">
             <div className="flex items-center justify-between border-b border-stone-100 pb-2">
@@ -1485,62 +1537,21 @@ export const VoiceAgentShell: React.FC = () => {
                 Close ✕
               </button>
             </div>
-            
+
             {activePantryLots.length === 0 ? (
               <p className="text-xs text-stone-500 py-2 text-center">Your pantry is clear. Tell Benkut what you bought or scan with camera.</p>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-40 overflow-y-auto">
                 {activePantryLots.map(item => (
                   <div key={item.id} className="flex items-center justify-between p-2 rounded-xl bg-stone-50 border border-stone-200 text-xs">
-                    <div>
-                      <span className="font-bold text-stone-900 block text-xs">{item.name}</span>
-                      <span className="text-[10px] text-stone-500">{item.remainingQuantity} {item.unit}</span>
-                    </div>
-                    <button
-                      onClick={() => {
-                        foodMemoryService.consumePantryLot(mutationMeta('voice'), item.id, 1);
-                        refreshMemory();
-                      }}
-                      className="px-2 py-0.5 bg-white border border-stone-200 rounded-lg text-[10px] font-bold text-stone-600 hover:bg-red-50 hover:text-red-700 cursor-pointer"
-                    >
-                      Used
-                    </button>
+                    <span className="font-bold text-stone-900 block text-xs truncate">{item.name}</span>
+                    <span className="text-[10px] text-stone-500 shrink-0 pl-1.5">{item.remainingQuantity} {item.unit}</span>
                   </div>
                 ))}
               </div>
             )}
 
-            <div className="flex items-center gap-1.5 pt-1">
-              <input
-                type="text"
-                value={newItemName}
-                onChange={e => setNewItemName(e.target.value)}
-                placeholder="Quick add item..."
-                className="flex-1 text-xs bg-stone-50 border border-stone-200 rounded-xl px-2.5 py-1.5 text-stone-900 focus:outline-none focus:border-emerald-600"
-              />
-              <button
-                onClick={() => {
-                  if (!newItemName.trim()) return;
-                  foodMemoryService.addPantryLot(mutationMeta('voice'), {
-                    productId: newItemName.toLowerCase().replace(/\W/g, '-'),
-                    name: newItemName.trim(),
-                    category: 'produce',
-                    quantity: 1,
-                    reservedQuantity: 0,
-                    unit: 'each',
-                    storageLocation: 'refrigerator',
-                    freshnessStatus: 'fresh',
-                    freshnessConfidence: 0.9,
-                    freshnessEvidence: ['Manual quick add']
-                  });
-                  setNewItemName('');
-                  refreshMemory();
-                }}
-                className="px-3 py-1.5 bg-[#174F35] text-white text-xs font-bold rounded-xl hover:bg-[#0E3826] cursor-pointer"
-              >
-                Add
-              </button>
-            </div>
+            <p className="text-[10px] text-stone-400 text-center pt-1">Say or type what changed - "I used the onions", "add two eggs"...</p>
           </div>
         )}
 
@@ -1562,20 +1573,13 @@ export const VoiceAgentShell: React.FC = () => {
               <div className="space-y-1.5 max-h-40 overflow-y-auto">
                 {activeShoppingList.map(item => (
                   <div key={item.id} className="flex items-center justify-between p-2 rounded-xl bg-stone-50 border border-stone-200 text-xs">
-                    <span className="font-bold text-stone-800 text-xs">{item.name} ({item.missingQuantity || item.desiredQuantity} {item.unit})</span>
-                    <button
-                      onClick={() => {
-                        foodMemoryService.markShoppingItemPurchased(mutationMeta('voice'), item.id);
-                        refreshMemory();
-                      }}
-                      className="px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-lg text-[10px] font-bold hover:bg-emerald-200 cursor-pointer"
-                    >
-                      ✓ Bought
-                    </button>
+                    <span className="font-bold text-stone-800 text-xs truncate">{item.name} ({item.missingQuantity || item.desiredQuantity} {item.unit})</span>
                   </div>
                 ))}
               </div>
             )}
+
+            <p className="text-[10px] text-stone-400 text-center pt-1">Say or type what changed - "I bought the tortillas", "add avocados"...</p>
           </div>
         )}
 
@@ -1639,32 +1643,12 @@ export const VoiceAgentShell: React.FC = () => {
           </div>
         )}
 
-        {/* 4. Contextual Quick Starters (ONLY on Turn 0 before conversation begins) */}
-        {conversation.length === 0 && (
-          <div id="voice-prompt-starters-container" className="w-full max-w-lg pt-3 mx-auto">
-            <div className="flex flex-wrap items-center justify-center gap-1.5">
-              <button
-                onClick={() => void handleTurn('What can I cook with what I have in my kitchen?', null, { inputMode: 'click' })}
-                className="rounded-full bg-white border border-[#DFE5DF] hover:border-[#174F35] hover:bg-[#E8F1E9] px-3 py-1 text-xs font-medium text-stone-700 shadow-2xs transition active:scale-95 text-left cursor-pointer"
-              >
-                💬 What can I cook with what I have?
-              </button>
-              <button
-                onClick={() => void handleTurn('What is in my pantry right now?', null, { inputMode: 'click' })}
-                className="rounded-full bg-white border border-[#DFE5DF] hover:border-[#174F35] hover:bg-[#E8F1E9] px-3 py-1 text-xs font-medium text-stone-700 shadow-2xs transition active:scale-95 text-left cursor-pointer"
-              >
-                💬 What is in my pantry?
-              </button>
-              <button
-                onClick={() => setShowCameraModal(true)}
-                className="rounded-full bg-white border border-[#DFE5DF] hover:border-[#174F35] hover:bg-[#E8F1E9] px-3 py-1 text-xs font-medium text-stone-700 shadow-2xs transition active:scale-95 text-left cursor-pointer flex items-center gap-1"
-              >
-                <span className="material-symbols-outlined text-xs text-[#174F35]">photo_camera</span>
-                <span>Scan ingredients</span>
-              </button>
-            </div>
-          </div>
-        )}
+        {/* Quick-starter chips lived here as a second, hardcoded set of
+            prompt buttons stacked directly under the Adaptive Suggestion
+            Chips above - two suggestion rows doing the same job on first
+            load. Removed: the environment-aware agentSuggestions chips
+            (which already include a scan/camera option in most contexts)
+            now cover this alone. */}
 
         <div ref={chatBottomRef} className="h-4 shrink-0" />
       </section>
@@ -1747,6 +1731,8 @@ export const VoiceAgentShell: React.FC = () => {
         onEnvironmentChange={handleSelectEnvironment}
         voiceCommand={transcript}
         history={conversation.slice(-12).map(c => ({ role: c.role, text: c.text }))}
+        isListening={isLiveListening}
+        onToggleListening={toggleListening}
         onAnalysisComplete={(data: any) => {
           // Note: autoTabulatedItems is already applied inside
           // CameraInspectionModal itself (executeAutonomousTabulation) -
@@ -1754,8 +1740,6 @@ export const VoiceAgentShell: React.FC = () => {
           if (data.speech) speak(data.speech, data.audioData);
           if (data.produceAnalysis) {
             setProduceCard(data.produceAnalysis);
-            setEditProduceName(data.produceAnalysis.name);
-            setEditProduceQuantity('1');
           }
           if (data.workspace) setWorkspaceResult(data.workspace);
           const foreground = data.foreground || data.pullScreen;

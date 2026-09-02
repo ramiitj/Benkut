@@ -53,6 +53,17 @@ const load = (): FoodMemoryState => {
   }
 };
 
+// Both failure paths below used to be a bare console.warn - invisible
+// outside devtools, so the user had no way to know a change wasn't
+// actually saved (localStorage failure) or wasn't backed up to their
+// account yet (Firestore failure). Dispatch a real event so the UI can
+// tell them plainly, in the agent's own voice, instead of silently
+// carrying on as if everything succeeded.
+export interface SyncIssueDetail { scope: 'local' | 'cloud'; message: string }
+const reportSyncIssue = (detail: SyncIssueDetail) => {
+  window.dispatchEvent(new CustomEvent<SyncIssueDetail>('benkut-sync-issue', { detail }));
+};
+
 const save = (state: FoodMemoryState) => {
   try {
     if (!state.shoppingList) state.shoppingList = state.shoppingItems;
@@ -61,6 +72,7 @@ const save = (state: FoodMemoryState) => {
     localStorage.setItem(KEY, JSON.stringify(state));
   } catch (e) {
     console.warn('LocalStorage save error:', e);
+    reportSyncIssue({ scope: 'local', message: e instanceof Error ? e.message : String(e) });
   }
   window.dispatchEvent(new Event('benkut-memory'));
 
@@ -71,10 +83,11 @@ const save = (state: FoodMemoryState) => {
     if (uid) {
       firebaseService.saveFoodMemory(uid, state).catch(err => {
         console.warn('Firestore cloud sync notice:', err);
+        reportSyncIssue({ scope: 'cloud', message: err instanceof Error ? err.message : String(err) });
       });
     }
-  } catch {
-    // Non-blocking fallback
+  } catch (e) {
+    reportSyncIssue({ scope: 'cloud', message: e instanceof Error ? e.message : String(e) });
   }
 };
 

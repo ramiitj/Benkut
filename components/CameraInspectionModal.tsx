@@ -51,6 +51,13 @@ interface CameraInspectionModalProps {
    * what was just discussed (e.g. "these tomatoes look wrinkled" said
    * right before opening the camera) instead of starting from nothing. */
   history?: { role: 'user' | 'assistant'; text: string }[];
+  /** The parent's live mic state and toggle - the background speech
+   * recognizer keeps running while this modal is open (voiceCommand above
+   * proves it), but with no visible control here the user had no way to
+   * tell the agent was still reachable. Surface a compact status/control
+   * in the header instead of leaving voice access invisible. */
+  isListening?: boolean;
+  onToggleListening?: () => void;
 }
 
 export const CameraInspectionModal: React.FC<CameraInspectionModalProps> = ({
@@ -61,7 +68,9 @@ export const CameraInspectionModal: React.FC<CameraInspectionModalProps> = ({
   environment = 'countertop',
   voiceCommand,
   onEnvironmentChange,
-  history
+  history,
+  isListening = false,
+  onToggleListening
 }) => {
   const { t, language, langInfo } = useLanguage();
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -465,6 +474,25 @@ Provide a friendly, warm spoken response in ${language} (${langInfo.bcp47}).`;
           </div>
 
           <div className="flex items-center gap-1.5">
+            {/* Voice agent stays reachable while scanning - the mic keeps
+                listening in the background, so make that visible/tappable
+                here instead of the modal looking like it silences it. */}
+            {onToggleListening && (
+              <button
+                id="camera-modal-mic-btn"
+                onClick={onToggleListening}
+                className={`w-8 h-8 rounded-full border transition flex items-center justify-center cursor-pointer ${
+                  isListening
+                    ? 'bg-emerald-500 border-emerald-400 text-stone-950 animate-pulse'
+                    : 'bg-stone-900 border-stone-800 text-stone-300 hover:text-white hover:bg-stone-800'
+                }`}
+                title={isListening ? (t('stopListening') || 'Stop listening') : (t('tapToSpeak') || 'Tap to speak')}
+                aria-label={isListening ? (t('stopListening') || 'Stop listening') : (t('tapToSpeak') || 'Tap to speak')}
+              >
+                <span className="material-symbols-outlined text-sm">{isListening ? 'graphic_eq' : 'mic'}</span>
+              </button>
+            )}
+
             {/* Camera Switch / Flip Button */}
             <button
               id="camera-modal-flip-btn"

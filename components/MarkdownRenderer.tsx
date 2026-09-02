@@ -10,27 +10,27 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, cla
   if (!content) return null;
 
   return (
-    <div className={`markdown-content ${className}`}>
+    <div className={`markdown-content break-words ${className}`}>
       <Markdown
         components={{
           h1: ({ children }) => (
             <h1 className="font-display font-black text-base sm:text-lg text-[#17231C] mt-3 mb-1.5 tracking-tight flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-[#174F35] shrink-0" />
-              <span>{children}</span>
+              <span className="break-words min-w-0">{children}</span>
             </h1>
           ),
           h2: ({ children }) => (
-            <h2 className="font-display font-bold text-sm sm:text-base text-[#174F35] mt-2.5 mb-1 tracking-tight">
+            <h2 className="font-display font-bold text-sm sm:text-base text-[#174F35] mt-2.5 mb-1 tracking-tight break-words">
               {children}
             </h2>
           ),
           h3: ({ children }) => (
-            <h3 className="font-display font-bold text-xs sm:text-sm text-stone-900 mt-2 mb-0.5">
+            <h3 className="font-display font-bold text-xs sm:text-sm text-stone-900 mt-2 mb-0.5 break-words">
               {children}
             </h3>
           ),
           p: ({ children }) => (
-            <p className="text-xs sm:text-sm text-stone-700 leading-relaxed my-1">
+            <p className="text-xs sm:text-sm text-stone-700 leading-relaxed my-1 break-words">
               {children}
             </p>
           ),
@@ -45,7 +45,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, cla
             </ol>
           ),
           li: ({ children }) => (
-            <li className="leading-relaxed pl-1 text-stone-700">
+            <li className="leading-relaxed pl-1 text-stone-700 break-words">
               {children}
             </li>
           ),
@@ -72,17 +72,17 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, cla
             </tr>
           ),
           th: ({ children }) => (
-            <th className="py-2 px-3 font-extrabold text-[#174F35]">
+            <th className="py-2 px-3 font-extrabold text-[#174F35] break-words">
               {children}
             </th>
           ),
           td: ({ children }) => (
-            <td className="py-2 px-3 text-stone-800 font-medium">
+            <td className="py-2 px-3 text-stone-800 font-medium break-words">
               {children}
             </td>
           ),
           blockquote: ({ children }) => (
-            <blockquote className="border-l-3 border-[#174F35] bg-[#E8F1E9]/40 pl-3 py-1.5 my-2 rounded-r-xl text-xs text-stone-700 italic">
+            <blockquote className="border-l-3 border-[#174F35] bg-[#E8F1E9]/40 pl-3 py-1.5 my-2 rounded-r-xl text-xs text-stone-700 italic break-words">
               {children}
             </blockquote>
           ),
@@ -92,7 +92,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, cla
             </strong>
           ),
           code: ({ children }) => (
-            <code className="bg-stone-100 text-stone-800 px-1.5 py-0.5 rounded-md text-[11px] font-mono border border-stone-200">
+            <code className="bg-stone-100 text-stone-800 px-1.5 py-0.5 rounded-md text-[11px] font-mono border border-stone-200 break-words">
               {children}
             </code>
           )

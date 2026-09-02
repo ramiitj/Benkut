@@ -7,7 +7,7 @@ interface SidebarProps { mode: ViewMode; setMode: (mode: ViewMode) => void; auth
 
 const userLinks = [
   { to: '/', icon: 'home', key: 'home', end: true },
-  { to: '/chef', icon: 'mic', key: 'Sous Chef' },
+  { to: '/chef', icon: 'mic', key: 'chef' },
 ] as const;
 
 const Sidebar: React.FC<SidebarProps> = ({ mode, setMode, auth }) => {

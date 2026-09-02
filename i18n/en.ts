@@ -2,7 +2,7 @@ export default {
   home: 'Home',
   myFood: 'My Food',
   fresh: 'Fresh Market',
-  chef: 'Sous-Chef',
+  chef: 'Cooking Coach',
   kitchenAssistant: 'Kitchen Assistant',
   pantryManager: 'Pantry Manager',
   shoppingAssistant: 'Shopping Assistant',
@@ -76,16 +76,23 @@ export default {
   specialist3Title: 'Shopping Assistant',
   specialist3Sub: 'Market Lists & Produce',
   specialist3Desc: 'Manages your shopping list at the store and inspects fresh produce quality using your camera.',
-  specialist4Title: 'Sous-Chef',
+  specialist4Title: 'Hands-Free Voice Coach',
   specialist4Sub: 'Step-by-Step Cooking',
   specialist4Desc: 'Speaks hands-free while your hands are busy chopping or stirring, guiding step-by-step cooking.',
 
   // Voice States & Culinary Domain Statuses
   listening: 'Listening hands-free...',
-  thinking: 'Consulting sous-chef...',
+  thinking: 'Consulting your cooking coach...',
   speaking: 'Speaking...',
   voiceReady: 'Ready on Countertop',
   tapToSpeak: 'Tap to speak',
+  // Short, single-word forms for the small circular mic orb, which has no
+  // room for the longer status sentences above without overflowing/
+  // clipping - keep these to one short word in every language.
+  orbListening: 'Listening',
+  orbSpeaking: 'Speaking',
+  orbThinking: 'Thinking',
+  orbTapToSpeak: 'Speak',
   listeningHandsFree: 'Listening hands-free',
   agentSpeaking: 'Benkut speaking',
   statusAuditingPantry: 'Auditing pantry inventory...',
@@ -101,6 +108,8 @@ export default {
   enableMic: 'Please enable microphone',
   couldNotHear: 'Could not hear clearly',
   tapToRetry: 'Tap orb to try again',
+  voiceUnavailableLabel: 'Voice unavailable',
+  voiceUnavailableSub: 'Reading the reply below instead',
   sayCloseOrCommand: 'Say "Close" or any command',
   tapOrType: 'Tap microphone or type to talk',
   cameraScanPantry: 'Pantry Scan',
