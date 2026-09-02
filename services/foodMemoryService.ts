@@ -467,6 +467,36 @@ class FoodMemoryService {
     });
   }
 
+  // The structured `allergies` list is what every specialist's system prompt
+  // is told to treat as a hard safety constraint (see the master prompt's
+  // ALLERGY & DIETARY SAFETY rule) - but until this method existed, nothing
+  // in the app ever actually wrote to it. A stated allergy only ever landed
+  // in the free-text, 200-char-capped memoryNotes list, which the model has
+  // to reliably re-parse out of loose prose on every future turn instead of
+  // reading one reliable structured field. Adds (merges, case-insensitive
+  // deduped) rather than replaces, so the model doesn't need perfect recall
+  // of the existing list to safely record one new allergy.
+  addAllergies(meta: MutationMeta | { actor?: string; timestamp?: string; trigger?: string }, allergies: string[]) {
+    const m: MutationMeta = ('actorUid' in meta && meta.actorUid && 'householdId' in meta)
+      ? (meta as MutationMeta)
+      : mutationMeta('voice');
+    const clean = allergies.map(a => a.trim()).filter(Boolean);
+    if (clean.length === 0) return [];
+
+    return this.mutate(m, 'ALLERGIES_UPDATED', s => {
+      const existing = Array.isArray(s.allergies) ? s.allergies : [];
+      const existingLower = new Set(existing.map(a => a.toLowerCase()));
+      for (const a of clean) {
+        if (!existingLower.has(a.toLowerCase())) {
+          existing.push(a);
+          existingLower.add(a.toLowerCase());
+        }
+      }
+      s.allergies = existing;
+      return s.allergies;
+    });
+  }
+
   // GDPR Data Portability (Article 20): Export entire user kitchen state as formatted JSON
   exportAllData(): {
     exportedAt: string;

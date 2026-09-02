@@ -558,6 +558,49 @@ export const VoiceAgentShell: React.FC = () => {
       return `I couldn't find ${targetName || 'that item'} on your shopping list.`;
     }
 
+    if (action.type === 'update_habit') {
+      const parts: string[] = [];
+      const newAllergies = Array.isArray(p.allergies) ? (p.allergies as unknown[]).map(String).filter(Boolean) : [];
+      if (newAllergies.length > 0) {
+        foodMemoryService.addAllergies(meta, newAllergies);
+        parts.push(`noted the allergy to ${newAllergies.join(', ')}`);
+      }
+
+      const habitPatch: Record<string, unknown> = {};
+      const currentHabits = foodMemoryService.getState()?.familyHabits;
+      const newRestrictions = Array.isArray(p.dietaryRestrictions) ? (p.dietaryRestrictions as unknown[]).map(String).filter(Boolean) : [];
+      if (newRestrictions.length > 0) {
+        const existing = currentHabits?.dietaryRestrictions || [];
+        const existingLower = new Set(existing.map(r => r.toLowerCase()));
+        habitPatch.dietaryRestrictions = [...existing, ...newRestrictions.filter(r => !existingLower.has(r.toLowerCase()))];
+        parts.push(`updated your dietary restrictions to include ${newRestrictions.join(', ')}`);
+      }
+      const newGoals = Array.isArray(p.healthGoals) ? (p.healthGoals as unknown[]).map(String).filter(Boolean) : [];
+      if (newGoals.length > 0) {
+        const existing = currentHabits?.healthGoals || [];
+        const existingLower = new Set(existing.map(g => g.toLowerCase()));
+        habitPatch.healthGoals = [...existing, ...newGoals.filter(g => !existingLower.has(g.toLowerCase()))];
+        parts.push(`added ${newGoals.join(', ')} to your health goals`);
+      }
+      if (typeof p.spiceTolerance === 'string' && p.spiceTolerance.trim()) {
+        habitPatch.spiceTolerance = p.spiceTolerance.trim();
+        parts.push(`set your spice tolerance to ${habitPatch.spiceTolerance}`);
+      }
+      if (typeof p.householdSize === 'number' && p.householdSize > 0) {
+        habitPatch.householdSize = p.householdSize;
+        parts.push(`updated your household size to ${p.householdSize}`);
+      }
+      if (Object.keys(habitPatch).length > 0) {
+        foodMemoryService.updateHabits(meta, habitPatch as Partial<typeof currentHabits>);
+      }
+
+      if (parts.length === 0) {
+        return "I didn't catch a specific preference to save there - could you say it again?";
+      }
+      refreshMemory();
+      return `Got it, I've ${parts.join(' and ')}.`;
+    }
+
     return "I don't yet support completing that action automatically - tell me what you'd like changed and I'll help another way.";
   };
 
