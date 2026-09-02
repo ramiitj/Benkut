@@ -640,6 +640,14 @@ export const VoiceAgentShell: React.FC = () => {
     // 5. Pending Action Confirmations (or voice confirmation for produce add)
     if (pendingAction && /^(yes|confirm|do it|save|yeah|yep|sure|ok|okay|sí|si|हाँ|हां|haan|ha|అవును|add to pantry)$/i.test(clean)) {
       const meta = mutationMeta('voice');
+      // Only these two action types are actually implemented below. Found
+      // via live testing: a confirmed action of any other type (e.g. the
+      // "clear my pantry" flow, which legitimately requires confirmation)
+      // fell through both branches doing nothing, while the code still
+      // told the user "Confirmed and saved" - claiming success for an
+      // action that never happened. Track whether something real occurred
+      // and only claim it did when it actually did.
+      let handled = true;
       if (pendingAction.type === 'add_pantry') {
         const p = pendingAction.payload;
         foodMemoryService.addPantryLot(meta, {
@@ -668,17 +676,22 @@ export const VoiceAgentShell: React.FC = () => {
           status: 'needed'
         });
         setActiveOverlay('shopping');
+      } else {
+        handled = false;
       }
 
       refreshMemory();
       setPendingAction(null);
+      const replyText = handled
+        ? 'Confirmed and saved to your kitchen.'
+        : "I don't yet support completing that action automatically - please make that change directly on the Pantry or Shopping screen.";
       setConversation(turns => [
         ...turns,
         { id: crypto.randomUUID(), role: 'user', text: clean, timestamp: new Date().toLocaleTimeString() },
-        { id: crypto.randomUUID(), role: 'assistant', text: 'Confirmed and saved to your kitchen.', timestamp: new Date().toLocaleTimeString() }
+        { id: crypto.randomUUID(), role: 'assistant', text: replyText, timestamp: new Date().toLocaleTimeString() }
       ]);
       isProcessingRef.current = false;
-      speak('Confirmed. I have saved that to your kitchen.');
+      speak(handled ? 'Confirmed. I have saved that to your kitchen.' : replyText);
       return;
     }
 

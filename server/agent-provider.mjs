@@ -65,9 +65,21 @@ function getAIClient() {
 
 const cleanJson = (text) => {
   if (!text) {
-    throw Object.assign(new Error('Provider returned an empty response'), { status: 502 });
+    // An empty response from the provider is almost always its own safety
+    // system declining to generate anything at all (confirmed live: a
+    // request for drug-synthesis instructions produced this, not a
+    // transport failure) - respond in character instead of surfacing a
+    // raw 502 that looks like a crash rather than an intentional refusal.
+    return {
+      speech: "I can't help with that request, but I'm glad to help with anything in the kitchen.",
+      intent: 'general',
+      workspace: {
+        title: 'Kitchen Assistant',
+        body: "That request isn't something I can help with. Let me know what you'd like to cook or manage instead."
+      }
+    };
   }
-  
+
   // Strip Markdown code block indicators
   let cleaned = text.replace(/^```(json)?/m, '').replace(/```$/m, '').trim();
   const match = cleaned.match(/\{[\s\S]*\}/);
