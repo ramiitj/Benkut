@@ -1,4 +1,6 @@
 import http from 'node:http';
+import path from 'node:path';
+import {existsSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {randomBytes,timingSafeEqual} from 'node:crypto';
 import {MemoryQuotaStore,QuotaEngine,QuotaError} from './quota-engine.mjs';
@@ -111,6 +113,31 @@ export const handleApiRequest = async(req,res)=>{
 
 const isDirectRun = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (isDirectRun) {
-  const server=http.createServer(handleApiRequest);
-  server.listen(port,()=>console.log(`Benkut BFF listening on ${port}`));
+  const distDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist');
+  const hasBuiltFrontend = existsSync(path.join(distDir, 'index.html'));
+
+  if (hasBuiltFrontend) {
+    // Production/Cloud Run entrypoint: one process serves the built frontend
+    // (dist/, produced by `npm run build`) AND the /api/* backend, on the
+    // single port the platform expects. Local dev doesn't hit this path -
+    // `npm run dev` uses Vite's own middleware (see vite.config.ts) instead.
+    const express = (await import('express')).default;
+    const app = express();
+    app.disable('x-powered-by');
+    // Mounted at root (not '/api') deliberately: an '/api' mount would strip
+    // that prefix from req.url before handleApiRequest sees it, but its
+    // route table matches on the full '/api/...' path.
+    app.use((req, res, next) => {
+      if (req.url.startsWith('/api/')) return handleApiRequest(req, res);
+      next();
+    });
+    app.use(express.static(distDir, { index: false }));
+    app.get('/{*splat}', (req, res) => res.sendFile(path.join(distDir, 'index.html')));
+    app.listen(port, () => console.log(`Benkut serving built frontend + API from ${distDir} on ${port}`));
+  } else {
+    // API-only mode: no dist/ build present (e.g. `npm run server` during
+    // local development against a separately-running `npm run dev`).
+    const server = http.createServer(handleApiRequest);
+    server.listen(port, () => console.log(`Benkut API-only server listening on ${port} (no dist/ build found)`));
+  }
 }

@@ -1,0 +1,15 @@
+node_modules
+dist
+dist-ssr
+.git
+.env
+.env.*
+!.env.example
+*.log
+*service-account*.json
+*.pem
+credentials*.json
+tests
+docs
+.vscode
+.idea
