@@ -338,7 +338,7 @@ Provide a friendly, warm spoken response in ${language} (${langInfo.bcp47}).`;
           historySummary: (memoryState?.memoryNotes || []).join(' | '),
           context: memoryState,
           voiceGender: speechSynthesizer.getVoiceGender(),
-          image: { mimeType, data: base64Data }
+          image: { mimeType, data: base64Data, consent: true }
         })
       });
 

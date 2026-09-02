@@ -3,6 +3,48 @@ import { buildCombinedSystemInstruction, getSystemPrompts } from './prompt-store
 
 let aiClient = null;
 
+// The model chooses what goes into memoryNote, and it's replayed verbatim
+// into every future turn's system context once stored - a second-order
+// prompt-injection surface (a manipulated image, a crafted spoken phrase,
+// or a poisoned RAG-style source could try to get an instruction smuggled
+// into "durable memory" instead of just this one reply). Bound and screen
+// it the same way governance.mjs's filterRag screens untrusted content.
+const MEMORY_NOTE_MAX_LENGTH = 200;
+const INJECTION_PATTERN = /(ignore (all|any|previous|prior) instructions|system prompt|you are now|disregard (all|previous|prior)|new instructions?:)/i;
+function sanitizeMemoryNote(note) {
+  if (typeof note !== 'string') return null;
+  const trimmed = note.trim();
+  if (!trimmed || trimmed.length > MEMORY_NOTE_MAX_LENGTH || INJECTION_PATTERN.test(trimmed)) return null;
+  return trimmed;
+}
+
+// autoTabulatedItems drives unconfirmed writes straight to a user's
+// pantry/shopping Firestore data (see the "Autonomous Tabulation" design
+// in prompt-store.mjs) - nothing between the model's output and that write
+// currently validates shape or bounds, so a manipulated image or a
+// successful injection could otherwise write arbitrary junk. Constrain to
+// the same enums the client/schema already document.
+const ALLOWED_CATEGORIES = ['produce', 'dairy', 'bakery', 'protein', 'pantry', 'spice'];
+const ALLOWED_STORAGE = ['pantry', 'refrigerator', 'freezer', 'counter'];
+const ALLOWED_FRESHNESS = ['fresh', 'use-soon', 'use-first', 'possibly-deteriorating', 'expired'];
+const ALLOWED_TARGET = ['pantry', 'shopping'];
+function sanitizeAutoTabulatedItems(items) {
+  if (!Array.isArray(items)) return [];
+  return items.slice(0, 10).map(item => {
+    if (!item || typeof item.name !== 'string' || !item.name.trim()) return null;
+    const quantity = Number(item.quantity);
+    return {
+      name: item.name.trim().slice(0, 80),
+      quantity: Number.isFinite(quantity) && quantity > 0 && quantity <= 1000 ? quantity : 1,
+      unit: typeof item.unit === 'string' ? item.unit.trim().slice(0, 20) || 'each' : 'each',
+      category: ALLOWED_CATEGORIES.includes(item.category) ? item.category : 'pantry',
+      storageLocation: ALLOWED_STORAGE.includes(item.storageLocation) ? item.storageLocation : 'refrigerator',
+      freshnessStatus: ALLOWED_FRESHNESS.includes(item.freshnessStatus) ? item.freshnessStatus : 'fresh',
+      target: ALLOWED_TARGET.includes(item.target) ? item.target : 'pantry'
+    };
+  }).filter(Boolean);
+}
+
 function getAIClient() {
   const key = process.env.GEMINI_API_KEY;
   if (!key) {
@@ -227,12 +269,12 @@ export const generateAgentTurn = async ({ prompt, history = [], context = {}, en
     cameraCommand: parsed.cameraCommand || null,
     foreground: parsed.foreground || parsed.pullScreen || null,
     returnToVoiceAfter: typeof parsed.returnToVoiceAfter === 'number' && parsed.returnToVoiceAfter > 0 ? parsed.returnToVoiceAfter : null,
-    memoryNote: typeof parsed.memoryNote === 'string' && parsed.memoryNote.trim() ? parsed.memoryNote.trim() : null,
+    memoryNote: sanitizeMemoryNote(parsed.memoryNote),
     workspace: spokenText
       ? (parsed.workspace || { title: 'Kitchen Companion', body: spokenText })
       : (parsed.workspace || null),
     action: parsed.action || null,
-    autoTabulatedItems: Array.isArray(parsed.autoTabulatedItems) ? parsed.autoTabulatedItems : [],
+    autoTabulatedItems: sanitizeAutoTabulatedItems(parsed.autoTabulatedItems),
     shelfAnalysis: parsed.shelfAnalysis || null,
     produceAnalysis: parsed.produceAnalysis || null,
     timer: parsed.timer || null,

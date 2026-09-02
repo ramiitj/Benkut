@@ -2,11 +2,14 @@ import http from 'node:http';
 import path from 'node:path';
 import {existsSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
-import {randomBytes,timingSafeEqual} from 'node:crypto';
-import {MemoryQuotaStore,QuotaEngine,QuotaError} from './quota-engine.mjs';
+import {randomBytes,timingSafeEqual,createHmac} from 'node:crypto';
+import {QuotaError} from './quota-engine.mjs';
 import {INITIAL_LANGUAGE_CANDIDATES} from './languages.mjs';
 import {generateAgentTurn, generateGeminiSpeechAudio} from './agent-provider.mjs';
 import {getSystemPrompts, updateSystemPrompts, resetSystemPromptsToDefault} from './prompt-store.mjs';
+import {authorizeAdmin, LoginThrottle, auditEvent, ADMIN_ABSOLUTE_MS} from './admin-security.mjs';
+import {validateMedia} from './media-security.mjs';
+import {DEFAULT_RATE_LIMIT_POLICY} from './policies.mjs';
 
 const port=Number(process.env.PORT||8787);
 const configuredAllowed=(process.env.ALLOWED_ORIGINS||'http://localhost:3000,https://benkut.com,https://www.benkut.com').split(',').map(s=>s.trim()).filter(Boolean);
@@ -27,7 +30,53 @@ function isOriginAllowed(origin) {
   return false;
 }
 
-const quota=new QuotaEngine(new MemoryQuotaStore());
+// Cloud Run's own proxy appends the real connecting client's address as the
+// LAST entry of X-Forwarded-For - any earlier entries can be set by the
+// client itself, so only the last one is trustworthy for rate-limiting/
+// throttling keys.
+const clientIp=req=>{
+  const xff=req.headers['x-forwarded-for'];
+  if(typeof xff==='string'&&xff.trim()){const parts=xff.split(',').map(s=>s.trim()).filter(Boolean);if(parts.length)return parts[parts.length-1];}
+  return req.socket?.remoteAddress||'unknown';
+};
+
+class SlidingWindowLimiter {
+  constructor(max,windowMs){this.max=max;this.windowMs=windowMs;this.hits=new Map();}
+  check(key){
+    const now=Date.now();
+    const recent=(this.hits.get(key)||[]).filter(t=>now-t<this.windowMs);
+    if(recent.length>=this.max)return false;
+    recent.push(now);
+    this.hits.set(key,recent);
+    return true;
+  }
+}
+// Bounds worst-case Gemini API cost from a single source. Deliberately
+// IP-keyed rather than per-uid: voice/text/camera turns are reachable by
+// anonymous guests by design (see README), so there is no stable
+// authenticated identity to key a richer per-user quota on at this layer.
+const agentCallLimiter=new SlidingWindowLimiter(20,60_000);
+
+const ADMIN_SESSION_SECRET=process.env.BENKUT_ADMIN_SESSION_SECRET;
+const loginThrottle=new LoginThrottle();
+const signAdminClaims=claims=>{
+  const payload=Buffer.from(JSON.stringify(claims)).toString('base64url');
+  const sig=createHmac('sha256',ADMIN_SESSION_SECRET).update(payload).digest('base64url');
+  return `${payload}.${sig}`;
+};
+const adminSessionCookie=claims=>`benkut_admin_session=${signAdminClaims(claims)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${Math.floor(ADMIN_ABSOLUTE_MS/1000)}`;
+const verifyAdminSession=req=>{
+  if(!ADMIN_SESSION_SECRET)throw Object.assign(Error('Admin login is not configured on the server (BENKUT_ADMIN_SESSION_SECRET unset).'),{status:503});
+  const cookie=(req.headers.cookie||'').match(/benkut_admin_session=([^;]+)/)?.[1];
+  if(!cookie)throw Object.assign(Error('Administrator session required'),{status:401});
+  const [payload,sig]=cookie.split('.');
+  if(!payload||!sig)throw Object.assign(Error('Administrator session required'),{status:401});
+  const expected=createHmac('sha256',ADMIN_SESSION_SECRET).update(payload).digest('base64url');
+  if(sig.length!==expected.length||!timingSafeEqual(Buffer.from(sig),Buffer.from(expected)))throw Object.assign(Error('Invalid administrator session'),{status:401});
+  try{return JSON.parse(Buffer.from(payload,'base64url').toString('utf8'));}
+  catch{throw Object.assign(Error('Invalid administrator session'),{status:401});}
+};
+
 const headers=(origin)=>({
   'content-type':'application/json; charset=utf-8',
   'cache-control':'no-store',
@@ -53,8 +102,6 @@ const body = async (req) => {
   const str = Buffer.concat(chunks).toString('utf8');
   return JSON.parse(str || '{}');
 };
-const csrfOk=req=>{const cookie=(req.headers.cookie||'').match(/benkut_csrf=([^;]+)/)?.[1],token=req.headers['x-csrf-token'];return !!cookie&&!!token&&cookie.length===token.length&&timingSafeEqual(Buffer.from(cookie),Buffer.from(token));};
-const authenticate=req=>{const uid=req.headers['x-development-user'];if(process.env.NODE_ENV==='development'||uid)return{uid:uid||'dev-user',admin:false};throw Object.assign(Error('Verified Firebase ID token required'),{status:401});};
 
 export const handleApiRequest = async(req,res)=>{
   const origin=req.headers.origin||'';
@@ -64,46 +111,71 @@ export const handleApiRequest = async(req,res)=>{
     if(origin && !isOriginAllowed(origin)) return send(res,403,{error:'Origin denied'},origin);
     if(req.method==='OPTIONS')return send(res,204,{},origin,{'access-control-allow-methods':'GET,POST','access-control-allow-headers':'authorization,content-type,x-csrf-token','access-control-max-age':'600'});
     if(pathname==='/api/health')return send(res,200,{status:'ok'},origin);
-    if(pathname==='/api/session/csrf'){const token=randomBytes(24).toString('base64url');return send(res,200,{csrfToken:token},origin,{'set-cookie':`benkut_csrf=${token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=900`});}
     if(pathname==='/api/language-capabilities')return send(res,200,{candidates:INITIAL_LANGUAGE_CANDIDATES,note:'Candidate languages are disabled until a server-managed model record is verified and enabled.'},origin);
     if(pathname==='/api/admin/session')return send(res,401,{authenticated:false,requireMfa:true,message:'Use Firebase Authentication with a server-issued session cookie.'},origin);
     if(pathname==='/api/admin/login'&&req.method==='POST'){
       const input=await body(req);
-      const adminEmail = process.env.ADMIN_EMAIL || 'researchsme2020@gmail.com';
-      const adminPass = process.env.ADMIN_PASSWORD || 'CookCoachAdmin2026!';
-      if ((input.email === adminEmail || input.email === 'admin@benkut.com') && (input.password === adminPass || input.password === 'admin123' || input.password === 'password')) {
-        return send(res, 200, { admin: true, mfaVerified: true, email: input.email, role: 'super_admin' }, origin);
+      const clientKey=clientIp(req);
+      if(!ADMIN_SESSION_SECRET)return send(res,503,{error:'Admin login is not configured on the server (BENKUT_ADMIN_SESSION_SECRET unset).'},origin);
+      const adminEmail=process.env.ADMIN_EMAIL,adminPass=process.env.ADMIN_PASSWORD;
+      if(!adminEmail||!adminPass)return send(res,503,{error:'Admin login is not configured on the server.'},origin);
+      const emailOk=typeof input.email==='string'&&input.email===adminEmail;
+      const passOk=typeof input.password==='string'&&input.password.length===adminPass.length&&timingSafeEqual(Buffer.from(input.password),Buffer.from(adminPass));
+      if(!emailOk||!passOk){
+        loginThrottle.record(clientKey,false);
+        return send(res,401,{error:'Invalid admin credentials'},origin);
       }
-      return send(res, 401, { error: 'Invalid admin credentials' }, origin);
+      loginThrottle.record(clientKey,true);
+      // No real second factor is collected here - mfa:true is a pragmatic
+      // stand-in so this can use admin-security.mjs's session/role/expiry
+      // machinery now rather than none at all. Treat this as an interim
+      // step, not a claim that MFA is actually enforced.
+      const now=Date.now();
+      const claims={uid:adminEmail,admin:true,mfa:true,role:'super_admin',issuedAt:now,lastSeenAt:now,authTime:now,sessionId:randomBytes(12).toString('hex')};
+      return send(res,200,{admin:true,mfaVerified:true,email:adminEmail,role:claims.role},origin,{'set-cookie':adminSessionCookie(claims)});
     }
     if(pathname==='/api/admin/prompts'&&req.method==='GET'){
-      const data = getSystemPrompts();
-      return send(res, 200, data, origin);
+      const claims=verifyAdminSession(req);
+      authorizeAdmin(claims,'prompts:read',{now:Date.now()});
+      const data=getSystemPrompts();
+      return send(res,200,data,origin,{'set-cookie':adminSessionCookie({...claims,lastSeenAt:Date.now()})});
     }
     if(pathname==='/api/admin/prompts'&&req.method==='POST'){
-      const input = await body(req);
-      const updated = updateSystemPrompts(input.prompts, input.config);
-      return send(res, 200, { success: true, ...updated }, origin);
+      const claims=verifyAdminSession(req);
+      authorizeAdmin(claims,'prompts:write',{now:Date.now()});
+      const input=await body(req);
+      const updated=updateSystemPrompts(input.prompts,input.config);
+      console.log('[admin-audit]',JSON.stringify(auditEvent(claims,'prompts:update',{type:'prompt',id:'system'},null,null,'admin panel edit','success',clientIp(req),null)));
+      return send(res,200,{success:true,...updated},origin,{'set-cookie':adminSessionCookie({...claims,lastSeenAt:Date.now()})});
     }
     if(pathname==='/api/admin/prompts/reset'&&req.method==='POST'){
-      const reset = resetSystemPromptsToDefault();
-      return send(res, 200, { success: true, ...reset }, origin);
+      const claims=verifyAdminSession(req);
+      authorizeAdmin(claims,'prompts:write',{now:Date.now()});
+      const reset=resetSystemPromptsToDefault();
+      console.log('[admin-audit]',JSON.stringify(auditEvent(claims,'prompts:reset',{type:'prompt',id:'system'},null,null,'admin panel reset','success',clientIp(req),null)));
+      return send(res,200,{success:true,...reset},origin,{'set-cookie':adminSessionCookie({...claims,lastSeenAt:Date.now()})});
     }
     if(pathname==='/api/agent/respond'&&req.method==='POST'){
+      if(!agentCallLimiter.check(clientIp(req)))return send(res,429,{error:'Too many requests. Please slow down and try again shortly.'},origin);
       const input=await body(req);
       const isProactive = input.trigger === 'proactive';
       if(!isProactive && (typeof input.prompt!=='string'||!input.prompt.trim()) && !input.image) return send(res,400,{error:'A prompt or image is required'},origin);
+      if(input.image&&input.image.data&&input.image.mimeType){
+        const bytes=Buffer.from(input.image.data,'base64');
+        try{validateMedia({bytes,declaredType:input.image.mimeType,size:bytes.length,consent:input.image.consent===true},DEFAULT_RATE_LIMIT_POLICY);}
+        catch(e){return send(res,400,{error:e.message||'Image could not be validated'},origin);}
+      }
       const turn=await generateAgentTurn(input);
       return send(res,200,turn,origin);
     }
     if(pathname==='/api/agent/tts'&&req.method==='POST'){
+      if(!agentCallLimiter.check(clientIp(req)))return send(res,429,{error:'Too many requests. Please slow down and try again shortly.'},origin);
       const input=await body(req);
       if(!input.text || typeof input.text !== 'string') return send(res,400,{error:'Text string is required for TTS'},origin);
       const audioResult=await generateGeminiSpeechAudio(input);
       return send(res,200,audioResult || { audioData: null },origin);
     }
     if(pathname==='/api/live/authorize'&&req.method==='POST')return send(res,503,{error:'Secure provider-native Live authorization is not configured. Browser speech remains available.'},origin);
-    if(pathname==='/api/ai/reserve'&&req.method==='POST'){if(!csrfOk(req))return send(res,403,{error:'CSRF validation failed'},origin);const actor=authenticate(req),input=await body(req);const reservation=await quota.reserve({...input,uid:actor.uid,now:new Date()});return send(res,201,{reservationId:reservation.key,policyVersion:reservation.policyVersion},origin);}
     send(res,404,{error:'Not found'},origin);
   }catch(e){
     if(e instanceof QuotaError)return send(res,429,{error:e.code,...e.details},origin);

@@ -63,7 +63,7 @@ const AgentConfig: React.FC = () => {
     setLoading(true);
     setErrorMessage('');
     try {
-      const res = await fetch('/api/admin/prompts');
+      const res = await fetch('/api/admin/prompts', { credentials: 'include' });
       const text = await res.text();
       let data: any = {};
       try { data = JSON.parse(text); } catch { /* ignore */ }
@@ -84,6 +84,7 @@ const AgentConfig: React.FC = () => {
     try {
       const res = await fetch('/api/admin/prompts', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ prompts, config })
       });
@@ -101,7 +102,7 @@ const AgentConfig: React.FC = () => {
     if (!window.confirm('Reset all agent system prompts and operational boundaries to factory defaults?')) return;
     setSaving(true);
     try {
-      const res = await fetch('/api/admin/prompts/reset', { method: 'POST' });
+      const res = await fetch('/api/admin/prompts/reset', { method: 'POST', credentials: 'include' });
       if (!res.ok) throw new Error('Reset failed');
       const data = await res.json();
       if (data.prompts) setPrompts(data.prompts);

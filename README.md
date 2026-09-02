@@ -15,7 +15,7 @@ View your app in AI Studio: https://ai.studio/apps/drive/1XUH40V3NjM4j_gAyXVaO5F
 
 1. Install dependencies:
    `npm install`
-2. Copy `.env.example` to `.env.local` and configure `GEMINI_API_KEY`, `GEMINI_MODEL`, `VITE_FIREBASE_API_KEY`, and `VITE_FIREBASE_PROJECT_ID`.
+2. Copy `.env.example` to `.env.local` and configure `GEMINI_API_KEY`, `GEMINI_MODEL`, `VITE_FIREBASE_API_KEY`, and `VITE_FIREBASE_PROJECT_ID`. To use the admin panel (`/admin/*`), also set `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and `BENKUT_ADMIN_SESSION_SECRET` - none of these three have a default, so admin login is disabled entirely until all three are set (deliberately: earlier versions fell back to a guessable hardcoded credential when unset).
 3. Enable Firebase Email/Password Authentication and deploy `firestore.rules`.
 4. Run the app with `npm run dev`. This single command serves both the frontend and the `/api/*` backend (see `vite.config.ts` - its dev middleware calls straight into `server/index.mjs`'s request handler in-process), so a separate `npm run server` is not needed alongside it. `npm run server` is for the production entrypoint described below, or for running the API standalone against a separately-hosted frontend.
 
@@ -28,7 +28,7 @@ The `Dockerfile` builds one container that serves both the built frontend and th
 Two different kinds of configuration matter here, and mixing them up is the most common way this silently breaks:
 
 - **Build-time (`--build-arg`)**: `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_STORAGE_BUCKET`. Vite inlines these into the frontend JS bundle when the image is built - setting them only as Cloud Run runtime env vars has no effect, since nothing reads `import.meta.env` again after the build. If Firebase Auth/Firestore never initializes in the browser despite "the keys being set," this is almost always why.
-- **Runtime (Cloud Run service env vars / secrets, no rebuild needed to change)**: `GEMINI_API_KEY`, `GEMINI_MODEL`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ALLOWED_ORIGINS`. These are read fresh by the running Node process on each request - prefer `--set-secrets` over `--set-env-vars` for `GEMINI_API_KEY` and `ADMIN_PASSWORD` specifically, so they aren't visible in plain text in the service's revision config.
+- **Runtime (Cloud Run service env vars / secrets, no rebuild needed to change)**: `GEMINI_API_KEY`, `GEMINI_MODEL`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `BENKUT_ADMIN_SESSION_SECRET`, `ALLOWED_ORIGINS`. These are read fresh by the running Node process on each request - prefer `--set-secrets` over `--set-env-vars` for `GEMINI_API_KEY`, `ADMIN_PASSWORD`, and `BENKUT_ADMIN_SESSION_SECRET` specifically, so they aren't visible in plain text in the service's revision config. None of `ADMIN_EMAIL`/`ADMIN_PASSWORD`/`BENKUT_ADMIN_SESSION_SECRET` has a fallback - admin login (`/admin/*`) is disabled entirely (503) until all three are set.
 
 ```bash
 gcloud run deploy benkut \
@@ -46,7 +46,7 @@ EOF
 ```bash
 gcloud run services update benkut \
   --region <your-region> \
-  --set-secrets=GEMINI_API_KEY=gemini-api-key:latest,ADMIN_PASSWORD=admin-password:latest \
+  --set-secrets=GEMINI_API_KEY=gemini-api-key:latest,ADMIN_PASSWORD=admin-password:latest,BENKUT_ADMIN_SESSION_SECRET=admin-session-secret:latest \
   --set-env-vars=ADMIN_EMAIL=<your-admin-email>,ALLOWED_ORIGINS=https://<your-cloud-run-url>
 ```
 
