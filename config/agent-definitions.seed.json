@@ -1,0 +1,10 @@
+[
+ {"id":"orchestrator","promptVersion":"orchestrator-v1","tools":[],"rag":[],"rateLimitPolicy":"pilot-v1"},
+ {"id":"eating-memory","promptVersion":"eating-v1","tools":["logMeal","updateMealLog","savePreferenceEvidence"],"rag":["nutrition_reference","local_food_names"],"rateLimitPolicy":"pilot-v1"},
+ {"id":"pantry","promptVersion":"pantry-v1","tools":["addPantryLot","adjustPantryQuantity","recordWaste"],"rag":["freshness_and_storage","units_and_measurements"],"rateLimitPolicy":"pilot-v1"},
+ {"id":"planning","promptVersion":"planning-v1","tools":["createShoppingPlan","addShoppingListItem"],"rag":["recipes_and_techniques","local_food_names"],"rateLimitPolicy":"pilot-v1"},
+ {"id":"fresh-shopping","promptVersion":"fresh-v1","tools":["evaluateStoreItem","compareStoreItems","addCartItem"],"rag":["allergens_and_labels","produce_quality","meat_poultry_seafood","dairy_eggs_frozen","bakery"],"rateLimitPolicy":"pilot-v1"},
+ {"id":"purchase-storage","promptVersion":"purchase-v1","tools":["confirmPurchase","createPantryLotsFromPurchase"],"rag":["freshness_and_storage"],"rateLimitPolicy":"pilot-v1"},
+ {"id":"live-chef","promptVersion":"chef-v1","tools":["startCookingSession","recordCookingIngredientUse","completeCookingSession"],"rag":["recipes_and_techniques","cooking_safety"],"rateLimitPolicy":"pilot-v1"},
+ {"id":"safety-validation","promptVersion":"safety-v1","tools":[],"rag":["food_safety_global","food_safety_india","food_safety_by_jurisdiction","allergens_and_labels"],"rateLimitPolicy":"pilot-v1"}
+]

@@ -1,0 +1,6 @@
+import {createHash} from 'node:crypto';
+export const PROMPT_STATES=['draft','validated','tested','reviewed','staged','published','retired'];
+export const hash=v=>createHash('sha256').update(typeof v==='string'?v:JSON.stringify(v)).digest('hex');
+export const publishPrompt=(prompt,actor)=>{if(prompt.status!=='staged'||!prompt.reviewedBy||!actor.reauthenticated)throw Error('Staged, reviewed prompt and recent reauthentication required');return{...prompt,status:'published',publishedBy:actor.uid,effectiveAt:new Date().toISOString(),promptHash:hash(prompt.promptContent)};};
+export const approveRag=(doc,actor)=>{if(!actor.permissions.includes('rag:approve')||!doc.sourceUrl||!doc.contentHash)throw Error('RAG approval denied');return{...doc,approvalStatus:'approved',approvedBy:actor.uid,approvedAt:new Date().toISOString()};};
+export const filterRag=(docs,{agent,jurisdiction,language,limit=8})=>docs.filter(d=>d.approvalStatus==='approved'&&!d.retired&&d.agentAllowlist.includes(agent)&&(d.jurisdiction==='global'||d.jurisdiction===jurisdiction)&&d.language===language&&!/(ignore (all|previous) instructions|system prompt|execute tool)/i.test(d.content)).slice(0,Math.min(limit,8)).map(d=>({content:d.content,sourceTitle:d.sourceTitle,sourceUrl:d.sourceUrl,contentHash:d.contentHash,version:d.documentVersion}));

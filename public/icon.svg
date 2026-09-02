@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="128" fill="#174F35"/>
+  <circle cx="256" cy="256" r="180" fill="#0F3D29" opacity="0.6"/>
+  <!-- Animated leaf / flame fork motif for CookCoach AI / Benkut -->
+  <g transform="translate(256, 260)">
+    <rect x="-16" y="-120" width="32" height="150" rx="16" fill="#DFF36C" />
+    <rect x="-70" y="-80" width="28" height="100" rx="14" fill="#DFF36C" transform="rotate(-28)" />
+    <rect x="42" y="-80" width="28" height="100" rx="14" fill="#DFF36C" transform="rotate(28)" />
+    <circle cx="0" cy="50" r="24" fill="#DFF36C"/>
+    <path d="M-80 50 C-80 110, 80 110, 80 50" fill="none" stroke="#DFF36C" stroke-width="20" stroke-linecap="round"/>
+  </g>
+</svg>

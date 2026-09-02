@@ -1,0 +1,39 @@
+{
+  "name": "cookcoach-ai",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "server": "node server/index.mjs",
+    "build": "vite build",
+    "lint": "tsc --noEmit",
+    "preview": "vite preview",
+    "test": "node --test tests/*.test.mjs",
+    "security:check": "node scripts/security-check.mjs"
+  },
+  "dependencies": {
+    "@capacitor/cli": "^8.5.1",
+    "@capacitor/core": "^8.5.1",
+    "@google/genai": "^1.35.0",
+    "@types/express": "^5.0.6",
+    "esbuild": "^0.28.2",
+    "express": "^5.2.1",
+    "firebase": "^12.18.0",
+    "lucide-react": "^1.39.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "react-markdown": "^10.1.0",
+    "react-router-dom": "^7.12.0",
+    "recharts": "^3.6.0",
+    "tsx": "^4.23.13",
+    "uuid": "9.0.1",
+    "vite-plugin-pwa": "^1.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0"
+  }
+}

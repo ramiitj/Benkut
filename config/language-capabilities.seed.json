@@ -1,0 +1,18 @@
+{
+  "modelProvider": "google",
+  "modelId": "CONFIGURE_ON_SERVER",
+  "capabilityType": "multimodal",
+  "supportedInputLanguages": [],
+  "supportedOutputLanguages": [],
+  "supportedLiveLanguages": [],
+  "supportedTranscriptionLanguages": [],
+  "supportedTextToSpeechLanguages": [],
+  "supportedCodeSwitching": false,
+  "bcp47Codes": ["en","hi","bn","te","mr","ta","ur","gu","kn","ml","pa","or","as","ne","ar","es","fr","de","pt","zh-CN","ja","ko","id","ru","it","tr","vi","th","pl","nl","sw"],
+  "verifiedAgainstOfficialDocumentationAt": null,
+  "enabledForUsers": false,
+  "enabledForPilot": false,
+  "fallbackLanguage": "en",
+  "notes": "Candidate seed only. Populate modality arrays from current official model documentation before enabling.",
+  "version": 1
+}

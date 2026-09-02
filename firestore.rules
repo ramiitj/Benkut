@@ -1,0 +1,26 @@
+rules_version = '2';
+service cloud.firestore { match /databases/{database}/documents {
+  function signedIn() { return request.auth != null; }
+  function member(hid) { return signedIn() && exists(/databases/$(database)/documents/households/$(hid)/members/$(request.auth.uid)); }
+  function editor(hid) { return member(hid) && get(/databases/$(database)/documents/households/$(hid)/members/$(request.auth.uid)).data.role in ['owner','editor']; }
+  function admin() { return signedIn() && request.auth.token.admin == true; }
+  function elevated() { return admin() && request.auth.token.mfa == true; }
+  match /users/{uid} {
+    allow read, create, update, delete: if signedIn() && request.auth.uid == uid;
+    match /private/{doc} { allow read, write: if signedIn() && request.auth.uid == uid; }
+    match /conversations/{sessionId} { allow read, create, update, delete: if signedIn() && request.auth.uid == uid; }
+    match /foodMemory/{doc} { allow read, create, update, delete: if signedIn() && request.auth.uid == uid; }
+  }
+  match /telemetry_events/{id} {
+    allow create: if true;
+    allow read: if signedIn();
+  }
+  match /households/{hid} { allow read: if member(hid); allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid; allow update, delete: if editor(hid);
+    match /members/{uid} { allow read: if member(hid); allow write: if editor(hid); }
+    match /foodEvents/{eventId} { allow read: if member(hid); allow create: if editor(hid) && request.resource.data.actorUid == request.auth.uid && request.resource.data.householdId == hid && request.resource.data.schemaVersion == 1; allow update, delete: if false; }
+    match /{collection}/{doc} { allow read: if member(hid); allow create, update, delete: if editor(hid); match /{subcollection}/{subdoc} { allow read: if member(hid); allow create, update, delete: if editor(hid); } }
+  }
+  match /system/languageCapabilities/{id} { allow read: if signedIn() && resource.data.enabledForUsers == true; allow write: if elevated() && request.auth.token.role in ['super_admin','agent_governance_admin']; }
+  match /system/{registry}/{id} { allow read, write: if false; }
+  match /adminAuditLogs/{id} { allow create: if elevated() && request.resource.data.administratorId == request.auth.uid; allow read: if elevated() && request.auth.token.role in ['super_admin','security_admin','audit_readonly']; allow update, delete: if false; }
+}}
