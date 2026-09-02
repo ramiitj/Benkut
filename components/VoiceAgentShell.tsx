@@ -20,6 +20,8 @@ import {
   CULINARY_ENVIRONMENTS,
 } from '../services/environmentalGreetingEngine';
 
+const PROACTIVE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+
 type VoiceState = 'ready' | 'requesting' | 'listening' | 'understanding' | 'speaking' | 'paused' | 'unavailable' | 'error';
 type OverlayView = 'pantry' | 'shopping' | 'cook' | null;
 
@@ -53,9 +55,12 @@ interface AgentResult {
   audioSampleRate?: number;
   voiceName?: string | null;
   intent: string;
-  pullScreen?: 'auth' | 'camera' | 'habits' | 'pantry' | 'shopping' | 'cook' | 'close' | null;
+  pullScreen?: 'auth' | 'camera' | 'habits' | 'pantry' | 'shopping' | 'cook' | 'close' | 'voice' | null;
   cameraCommand?: 'open' | 'capture' | 'close' | null;
-  workspace: { title: string; body: string; data?: Record<string, unknown> };
+  foreground?: 'voice' | 'camera' | 'pantry' | 'shopping' | 'cook' | 'close' | null;
+  returnToVoiceAfter?: number | null;
+  memoryNote?: string | null;
+  workspace: { title: string; body: string; data?: Record<string, unknown> } | null;
   action?: AgentAction | null;
   produceAnalysis?: ProduceAnalysisData | null;
   timer?: { label: string; durationSeconds: number } | null;
@@ -119,7 +124,12 @@ export const VoiceAgentShell: React.FC = () => {
   const isProcessingRef = useRef<boolean>(false);
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const autoSleepTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const returnToVoiceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
+
+  // Long-term memory notes: short durable facts the agent chose to remember
+  // across turns (allergies, standing preferences, recurring requests).
+  const [sessionMemoryNotes, setSessionMemoryNotes] = useState<string[]>([]);
 
   // Core State
   const [voiceState, setVoiceState] = useState<VoiceState>('ready');
@@ -309,6 +319,31 @@ export const VoiceAgentShell: React.FC = () => {
     }
   }, []);
 
+  // Load persisted long-term memory notes once we know who the user is
+  useEffect(() => {
+    if (!account?.uid) return;
+    try {
+      const raw = localStorage.getItem(`benkut_memory_notes_${account.uid}`);
+      if (raw) setSessionMemoryNotes(JSON.parse(raw));
+    } catch {
+      // ignore malformed/missing local storage
+    }
+  }, [account?.uid]);
+
+  const rememberNote = useCallback((note: string | null | undefined) => {
+    if (!note) return;
+    setSessionMemoryNotes(prev => {
+      if (prev.includes(note)) return prev;
+      const next = [...prev, note].slice(-12);
+      try {
+        if (account?.uid) localStorage.setItem(`benkut_memory_notes_${account.uid}`, JSON.stringify(next));
+      } catch {
+        // ignore storage failures (private mode, quota)
+      }
+      return next;
+    });
+  }, [account?.uid]);
+
   // Audio unlock listener
   useEffect(() => {
     const handleUnlock = () => speechSynthesizer.unlockAudio();
@@ -347,6 +382,17 @@ export const VoiceAgentShell: React.FC = () => {
         setVoiceState('ready');
       }
     }, 28000);
+  }, []);
+
+  // The agent can ask to auto-return to the voice-first view after showing
+  // an overlay/camera briefly (a quick confirmation, a short list glance).
+  // Any new turn cancels a pending auto-return so it never fires mid-task.
+  const scheduleReturnToVoice = useCallback((seconds: number) => {
+    if (returnToVoiceTimerRef.current) clearTimeout(returnToVoiceTimerRef.current);
+    returnToVoiceTimerRef.current = setTimeout(() => {
+      setActiveOverlay(null);
+      setShowCameraModal(false);
+    }, Math.max(1, seconds) * 1000);
   }, []);
 
   const speak = useCallback((message: string, audioData?: string | null, onDone?: () => void) => {
@@ -406,6 +452,115 @@ export const VoiceAgentShell: React.FC = () => {
     });
   }, [isMuted, voiceGender, langInfo.bcp47, resetAutoSleepTimer, resumeListening]);
 
+  // Applies one agent response to app state - shared by user-triggered turns
+  // and silent proactive check-ins. `userTurnText` is the text to log as the
+  // user's side of the exchange, or null for a proactive check-in that has
+  // no matching user utterance (only logged if the agent actually replied).
+  const applyAgentResult = useCallback((result: AgentResult, userTurnText: string | null) => {
+    const foreground = result.foreground || result.pullScreen;
+
+    // Autonomous Camera Management & Screen Routing (agent-owned foreground)
+    if (result.cameraCommand === 'open' || foreground === 'camera') {
+      setShowCameraModal(true);
+    } else if (result.cameraCommand === 'close') {
+      setShowCameraModal(false);
+    }
+
+    if (foreground === 'pantry') {
+      setActiveOverlay('pantry');
+    } else if (foreground === 'shopping') {
+      setActiveOverlay('shopping');
+    } else if (foreground === 'cook') {
+      setActiveOverlay('cook');
+    } else if (foreground === 'close' || foreground === 'voice') {
+      setActiveOverlay(null);
+      setShowCameraModal(false);
+    }
+
+    // Autonomous Cooking Timer Trigger
+    if (result.timer && typeof result.timer.durationSeconds === 'number') {
+      setTimerSeconds(result.timer.durationSeconds);
+      setTimerActive(true);
+      setActiveOverlay('cook');
+    }
+
+    // Continuous Feedback Prompt & Adaptive Suggestions
+    setFeedbackPrompt(result.feedbackPrompt || null);
+    setAgentSuggestions(Array.isArray(result.suggestions) && result.suggestions.length > 0 ? result.suggestions : []);
+    setWorkspaceResult(result.workspace && result.workspace.body ? result.workspace : null);
+
+    if (result.produceAnalysis) {
+      setProduceCard(result.produceAnalysis);
+      setEditProduceName(result.produceAnalysis.name);
+      setEditProduceQuantity('1');
+    }
+
+    // Autonomous Item Auto-Tabulation when items are recognized
+    if (Array.isArray((result as any).autoTabulatedItems) && (result as any).autoTabulatedItems.length > 0) {
+      const meta = mutationMeta('voice');
+      for (const item of (result as any).autoTabulatedItems) {
+        if (!item.name) continue;
+        if (item.target === 'shopping') {
+          foodMemoryService.addShoppingListItem(meta, {
+            id: crypto.randomUUID(),
+            name: item.name,
+            reason: 'restock',
+            desiredQuantity: Number(item.quantity) || 1,
+            availableQuantity: 0,
+            missingQuantity: Number(item.quantity) || 1,
+            unit: item.unit || 'each',
+            status: 'needed'
+          });
+        } else {
+          foodMemoryService.addPantryLot(meta, {
+            productId: item.name.toLowerCase().replace(/\W/g, '-'),
+            name: item.name,
+            category: item.category || 'produce',
+            quantity: Number(item.quantity) || 1,
+            reservedQuantity: 0,
+            unit: item.unit || 'each',
+            storageLocation: item.storageLocation || 'refrigerator',
+            freshnessStatus: item.freshnessStatus || 'fresh',
+            freshnessConfidence: 0.9,
+            freshnessEvidence: ['Autonomous voice agent tabulation']
+          });
+        }
+      }
+      refreshMemory();
+    }
+
+    rememberNote(result.memoryNote);
+
+    const hasSpeech = Boolean(result.speech && result.speech.trim());
+    if (userTurnText !== null || hasSpeech) {
+      setConversation(turns => {
+        const next = [...turns];
+        if (userTurnText !== null) {
+          next.push({ id: crypto.randomUUID(), role: 'user', text: userTurnText, timestamp: new Date().toLocaleTimeString() });
+        }
+        if (hasSpeech) {
+          next.push({ id: crypto.randomUUID(), role: 'assistant', text: result.speech, timestamp: new Date().toLocaleTimeString() });
+        }
+        return next.slice(-24);
+      });
+    }
+
+    if (result.action && result.confirmationRequired) {
+      setPendingAction(result.action);
+    }
+
+    if (result.returnToVoiceAfter) {
+      scheduleReturnToVoice(result.returnToVoiceAfter);
+    }
+
+    if (hasSpeech) {
+      speak(result.speech, result.audioData);
+    }
+    // A proactive check-in with nothing to say (hasSpeech false, userTurnText
+    // null) intentionally does nothing further - no state disruption, no
+    // interruption of whatever the user is doing.
+  }, [speak, scheduleReturnToVoice, rememberNote]);
+
   // Main turn processing
   const handleTurn = useCallback(async (
     text: string,
@@ -414,10 +569,16 @@ export const VoiceAgentShell: React.FC = () => {
   ) => {
     const clean = text.trim();
     if (!clean && !customImage) return;
+    // Guard against overlapping turns: continuous listening can emit another
+    // final result while a previous request is still in flight, which used
+    // to fire a second concurrent handleTurn and let whichever response
+    // landed last silently clobber the other (garbled replies, cut audio).
+    if (isProcessingRef.current) return;
 
     const inputMode = options.inputMode || 'voice';
 
     isProcessingRef.current = true;
+    if (returnToVoiceTimerRef.current) clearTimeout(returnToVoiceTimerRef.current);
     speechSynthesizer.unlockAudio();
 
     if (customImage) {
@@ -595,7 +756,7 @@ export const VoiceAgentShell: React.FC = () => {
     // 8. AI Processing with Gemini backend
     try {
       const memoryState = foodMemoryService.getState();
-      const historyPayload = conversation.map(c => ({ role: c.role, text: c.text }));
+      const historyPayload = conversation.slice(-12).map(c => ({ role: c.role, text: c.text }));
 
       const response = await fetch('/api/agent/respond', {
         method: 'POST',
@@ -603,7 +764,9 @@ export const VoiceAgentShell: React.FC = () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           prompt: clean,
+          trigger: 'user',
           history: historyPayload,
+          historySummary: sessionMemoryNotes.join(' | '),
           context: memoryState,
           environment,
           language,
@@ -622,101 +785,7 @@ export const VoiceAgentShell: React.FC = () => {
       }
       if (!response.ok) throw new Error(result.error || 'Agent service is temporarily unavailable');
 
-      // Autonomous Camera Management & Screen Routing
-      if (result.cameraCommand === 'open' || result.pullScreen === 'camera') {
-        setShowCameraModal(true);
-      } else if (result.cameraCommand === 'close') {
-        setShowCameraModal(false);
-      }
-
-      if (result.pullScreen === 'pantry') {
-        setActiveOverlay('pantry');
-      } else if (result.pullScreen === 'shopping') {
-        setActiveOverlay('shopping');
-      } else if (result.pullScreen === 'cook') {
-        setActiveOverlay('cook');
-      } else if (result.pullScreen === 'close') {
-        setActiveOverlay(null);
-        setShowCameraModal(false);
-      }
-
-      // Autonomous Cooking Timer Trigger
-      if (result.timer && typeof result.timer.durationSeconds === 'number') {
-        setTimerSeconds(result.timer.durationSeconds);
-        setTimerActive(true);
-        setActiveOverlay('cook');
-      }
-
-      // Continuous Feedback Prompt & Adaptive Suggestions
-      if (result.feedbackPrompt) {
-        setFeedbackPrompt(result.feedbackPrompt);
-      } else {
-        setFeedbackPrompt(null);
-      }
-
-      if (Array.isArray(result.suggestions) && result.suggestions.length > 0) {
-        setAgentSuggestions(result.suggestions);
-      } else {
-        setAgentSuggestions([]);
-      }
-
-      if (result.workspace && result.workspace.body) {
-        setWorkspaceResult(result.workspace);
-      } else {
-        setWorkspaceResult(null);
-      }
-
-      if (result.produceAnalysis) {
-        setProduceCard(result.produceAnalysis);
-        setEditProduceName(result.produceAnalysis.name);
-        setEditProduceQuantity('1');
-      }
-
-      // Autonomous Item Auto-Tabulation when items are recognized
-      if (Array.isArray((result as any).autoTabulatedItems) && (result as any).autoTabulatedItems.length > 0) {
-        const meta = mutationMeta('voice');
-        for (const item of (result as any).autoTabulatedItems) {
-          if (!item.name) continue;
-          if (item.target === 'shopping') {
-            foodMemoryService.addShoppingListItem(meta, {
-              id: crypto.randomUUID(),
-              name: item.name,
-              reason: 'restock',
-              desiredQuantity: Number(item.quantity) || 1,
-              availableQuantity: 0,
-              missingQuantity: Number(item.quantity) || 1,
-              unit: item.unit || 'each',
-              status: 'needed'
-            });
-          } else {
-            foodMemoryService.addPantryLot(meta, {
-              productId: item.name.toLowerCase().replace(/\W/g, '-'),
-              name: item.name,
-              category: item.category || 'produce',
-              quantity: Number(item.quantity) || 1,
-              reservedQuantity: 0,
-              unit: item.unit || 'each',
-              storageLocation: item.storageLocation || 'refrigerator',
-              freshnessStatus: item.freshnessStatus || 'fresh',
-              freshnessConfidence: 0.9,
-              freshnessEvidence: ['Autonomous voice agent tabulation']
-            });
-          }
-        }
-        refreshMemory();
-      }
-
-      setConversation(turns => [
-        ...turns,
-        { id: crypto.randomUUID(), role: 'user' as const, text: clean, timestamp: new Date().toLocaleTimeString() },
-        { id: crypto.randomUUID(), role: 'assistant' as const, text: result.speech, timestamp: new Date().toLocaleTimeString() }
-      ].slice(-24));
-
-      if (result.action && result.confirmationRequired) {
-        setPendingAction(result.action);
-      }
-
-      speak(result.speech, result.audioData);
+      applyAgentResult(result, clean);
     } catch (err: unknown) {
       console.error('Agent turn failed:', err);
       const errMessage = err instanceof Error ? err.message : 'Could not process request';
@@ -725,7 +794,71 @@ export const VoiceAgentShell: React.FC = () => {
     } finally {
       isProcessingRef.current = false;
     }
-  }, [account, conversation, language, langInfo.bcp47, pendingAction, activeOverlay, showCameraModal, speak, isGuest]);
+  }, [account, conversation, language, langInfo.bcp47, pendingAction, activeOverlay, showCameraModal, speak, isGuest, applyAgentResult, sessionMemoryNotes, environment, voiceGender]);
+
+  // Proactive check-in: periodically (and when the tab regains focus) gives
+  // the agent a silent turn - current kitchen state plus recent history,
+  // no new user input - so it can speak up on its own when something is
+  // genuinely worth surfacing (an expiring item, an unfinished shopping
+  // list, a follow-up on something left open). Skips entirely whenever the
+  // user is mid-interaction so it never talks over or interrupts anything.
+  const runProactiveCheck = useCallback(async () => {
+    if (isProcessingRef.current) return;
+    if (voiceState === 'speaking' || voiceState === 'listening' || voiceState === 'understanding') return;
+    if (showCameraModal || showSettingsModal || showProfileModal || showAuthModal || showSaveModal || showTourModal) return;
+    if (pendingAction) return;
+    if (!account || isGuest) return;
+    if (conversation.length === 0) return;
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+
+    isProcessingRef.current = true;
+    try {
+      const memoryState = foodMemoryService.getState();
+      const historyPayload = conversation.slice(-12).map(c => ({ role: c.role, text: c.text }));
+
+      const response = await fetch('/api/agent/respond', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          prompt: '',
+          trigger: 'proactive',
+          history: historyPayload,
+          historySummary: sessionMemoryNotes.join(' | '),
+          context: memoryState,
+          environment,
+          language,
+          bcp47: langInfo.bcp47,
+          voiceGender
+        })
+      });
+      if (!response.ok) return;
+      const rawText = await response.text();
+      let result: AgentResult;
+      try {
+        result = JSON.parse(rawText);
+      } catch {
+        return;
+      }
+      applyAgentResult(result, null);
+    } catch (err) {
+      console.warn('Proactive check-in skipped (non-fatal):', err);
+    } finally {
+      isProcessingRef.current = false;
+    }
+  }, [voiceState, showCameraModal, showSettingsModal, showProfileModal, showAuthModal, showSaveModal, showTourModal, pendingAction, account, isGuest, conversation, environment, language, langInfo.bcp47, voiceGender, sessionMemoryNotes, applyAgentResult]);
+
+  useEffect(() => {
+    const interval = setInterval(() => { void runProactiveCheck(); }, PROACTIVE_CHECK_INTERVAL_MS);
+    const onVisibilityChange = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') void runProactiveCheck();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [runProactiveCheck]);
 
   // Speech Recognition Setup
   useEffect(() => {
@@ -1099,6 +1232,26 @@ export const VoiceAgentShell: React.FC = () => {
           )}
         </div>
 
+        {/* Scrollback Chat Log - every turn except the current exchange,
+            which stays highlighted below in the main reply card. */}
+        {conversation.length > 2 && (
+          <div id="voice-chat-log" className="w-full max-w-lg space-y-1.5 mb-1">
+            {conversation.slice(0, -2).map(turn => (
+              <div key={turn.id} className={`flex ${turn.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div
+                  className={`max-w-[85%] rounded-2xl px-3.5 py-2 text-xs leading-relaxed text-left ${
+                    turn.role === 'user'
+                      ? 'bg-[#174F35] text-white rounded-br-sm'
+                      : 'bg-white border border-[#DFE5DF] text-stone-700 rounded-bl-sm'
+                  }`}
+                >
+                  {turn.role === 'assistant' ? sanitizeSpokenText(turn.text) : turn.text}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Spoken Response & Main Insight Card */}
         <div
           id="voice-spoken-reply-card"
@@ -1127,9 +1280,12 @@ export const VoiceAgentShell: React.FC = () => {
             )}
           </div>
 
-          {/* Conversational Text */}
+          {/* Conversational Text - sanitized so any markdown the model
+              slips into "speech" despite instructions never leaks through
+              as literal asterisks/hashes (the TTS path already did this,
+              the on-screen text didn't). */}
           <p id="voice-spoken-reply-body" className="text-xs sm:text-sm text-stone-800 leading-relaxed font-medium whitespace-pre-line">
-            {spokenReply}
+            {sanitizeSpokenText(spokenReply)}
           </p>
 
           {/* Contextual Visual Produce Insight Card with Edit & Redo */}
@@ -1579,6 +1735,9 @@ export const VoiceAgentShell: React.FC = () => {
         onEnvironmentChange={handleSelectEnvironment}
         voiceCommand={transcript}
         onAnalysisComplete={(data: any) => {
+          // Note: autoTabulatedItems is already applied inside
+          // CameraInspectionModal itself (executeAutonomousTabulation) -
+          // don't route this through applyAgentResult or it would double-add.
           if (data.speech) speak(data.speech, data.audioData);
           if (data.produceAnalysis) {
             setProduceCard(data.produceAnalysis);
@@ -1586,10 +1745,19 @@ export const VoiceAgentShell: React.FC = () => {
             setEditProduceQuantity('1');
           }
           if (data.workspace) setWorkspaceResult(data.workspace);
-          if (data.specialist === 'pantry') setActiveOverlay('pantry');
-          if (data.specialist === 'shopping') setActiveOverlay('shopping');
-          if (data.pullScreen === 'close' || data.cameraCommand === 'close') {
+          const foreground = data.foreground || data.pullScreen;
+          if (foreground === 'pantry' || data.specialist === 'pantry') setActiveOverlay('pantry');
+          if (foreground === 'shopping' || data.specialist === 'shopping') setActiveOverlay('shopping');
+          if (foreground === 'close' || foreground === 'voice' || data.cameraCommand === 'close') {
             setShowCameraModal(false);
+          }
+          if (data.returnToVoiceAfter) scheduleReturnToVoice(data.returnToVoiceAfter);
+          rememberNote(data.memoryNote);
+          if (data.speech) {
+            setConversation(turns => [
+              ...turns,
+              { id: crypto.randomUUID(), role: 'assistant' as const, text: data.speech, timestamp: new Date().toLocaleTimeString() }
+            ].slice(-24));
           }
           refreshMemory();
         }}

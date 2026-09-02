@@ -146,7 +146,7 @@ export const generateGeminiSpeechAudio = async ({ text, voiceGender = 'female', 
   }
 };
 
-export const generateAgentTurn = async ({ prompt, history = [], context = {}, environment = 'countertop', image = null, specialist = null, language = 'English', bcp47 = 'en-US', voiceGender = 'female', voiceName = null, synthesizeSpeech = true }) => {
+export const generateAgentTurn = async ({ prompt, history = [], context = {}, environment = 'countertop', image = null, specialist = null, language = 'English', bcp47 = 'en-US', voiceGender = 'female', voiceName = null, synthesizeSpeech = true, trigger = 'user', historySummary = '' }) => {
   const ai = getAIClient();
   const { config } = getSystemPrompts();
   const rawModel = config.model || process.env.GEMINI_MODEL || 'gemini-3.7-flash';
@@ -177,7 +177,7 @@ export const generateAgentTurn = async ({ prompt, history = [], context = {}, en
   };
   const envDescription = envNames[environment] || envNames.countertop;
 
-  const contextPrompt = `Language: ${language} (${bcp47})\nActive Culinary Environment / Location: ${envDescription}\nCurrent Unified Core Memory & Kitchen State: ${JSON.stringify(context)}\n${specialist ? `Active Focus Agent: ${specialist}\n` : ''}User said/requested: ${prompt || 'Please inspect this photo.'}`;
+  const contextPrompt = `Language: ${language} (${bcp47})\nActive Culinary Environment / Location: ${envDescription}\nCurrent Unified Core Memory & Kitchen State: ${JSON.stringify(context)}\nLong-Term Memory Notes (durable facts from earlier in this session): ${historySummary || 'None yet.'}\n${specialist ? `Active Focus Agent: ${specialist}\n` : ''}Turn Trigger: ${trigger}\n${trigger === 'proactive' ? 'No new user input this turn. Review the state and recent conversation above and decide whether to speak up per the PROACTIVE CHECK-INS directive.' : `User said/requested: ${prompt || 'Please inspect this photo.'}`}`;
   userParts.push({ text: contextPrompt });
 
   const contents = [...formattedHistory, { role: 'user', parts: userParts }];
@@ -196,8 +196,14 @@ export const generateAgentTurn = async ({ prompt, history = [], context = {}, en
   const rawText = response.text || '';
   const parsed = cleanJson(rawText);
 
-  // Clean speech text for conversational voice presentation
-  let spokenText = sanitizeSpokenText(parsed.speech || 'I heard you, how can I help next in your kitchen?');
+  // Clean speech text for conversational voice presentation. A proactive
+  // check-in may deliberately have nothing to say (parsed.speech: null) -
+  // only fall back to a generic reply for user-triggered turns, where an
+  // empty "speech" is a provider slip rather than an intentional silence.
+  const rawSpeech = typeof parsed.speech === 'string' ? parsed.speech.trim() : '';
+  let spokenText = rawSpeech
+    ? sanitizeSpokenText(rawSpeech)
+    : (trigger === 'proactive' ? '' : sanitizeSpokenText('I heard you, how can I help next in your kitchen?'));
 
   let audioResult = null;
   if (synthesizeSpeech && spokenText) {
@@ -216,13 +222,15 @@ export const generateAgentTurn = async ({ prompt, history = [], context = {}, en
     audioData: audioResult?.audioData || null,
     audioSampleRate: audioResult?.sampleRate || 24000,
     voiceName: audioResult?.voiceName || null,
-    intent: parsed.intent || 'general',
-    pullScreen: parsed.pullScreen || null,
+    intent: parsed.intent || (trigger === 'proactive' && !spokenText ? 'idle' : 'general'),
+    pullScreen: parsed.pullScreen || parsed.foreground || null,
     cameraCommand: parsed.cameraCommand || null,
-    workspace: parsed.workspace || {
-      title: 'Kitchen Companion',
-      body: spokenText
-    },
+    foreground: parsed.foreground || parsed.pullScreen || null,
+    returnToVoiceAfter: typeof parsed.returnToVoiceAfter === 'number' && parsed.returnToVoiceAfter > 0 ? parsed.returnToVoiceAfter : null,
+    memoryNote: typeof parsed.memoryNote === 'string' && parsed.memoryNote.trim() ? parsed.memoryNote.trim() : null,
+    workspace: spokenText
+      ? (parsed.workspace || { title: 'Kitchen Companion', body: spokenText })
+      : (parsed.workspace || null),
     action: parsed.action || null,
     autoTabulatedItems: Array.isArray(parsed.autoTabulatedItems) ? parsed.autoTabulatedItems : [],
     shelfAnalysis: parsed.shelfAnalysis || null,

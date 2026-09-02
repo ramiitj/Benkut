@@ -89,7 +89,8 @@ export const handleApiRequest = async(req,res)=>{
     }
     if(pathname==='/api/agent/respond'&&req.method==='POST'){
       const input=await body(req);
-      if((typeof input.prompt!=='string'||!input.prompt.trim()) && !input.image) return send(res,400,{error:'A prompt or image is required'},origin);
+      const isProactive = input.trigger === 'proactive';
+      if(!isProactive && (typeof input.prompt!=='string'||!input.prompt.trim()) && !input.image) return send(res,400,{error:'A prompt or image is required'},origin);
       const turn=await generateAgentTurn(input);
       return send(res,200,turn,origin);
     }
