@@ -57,7 +57,7 @@ const Billing: React.FC = () => {
                <BarChart data={data}>
                   <Bar dataKey="value" radius={[4, 4, 0, 0]}>
                      {data.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill="#FDE047" fillOpacity={0.6 + (entry.value / 200)} />
+                        <Cell key={`cell-${index}`} fill="#174F35" fillOpacity={0.6 + (entry.value / 200)} />
                      ))}
                   </Bar>
                </BarChart>

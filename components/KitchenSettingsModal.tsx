@@ -97,7 +97,7 @@ export const KitchenSettingsModal: React.FC<KitchenSettingsModalProps> = ({
                         {item.icon}
                       </span>
                       <div className="min-w-0">
-                        <span className="text-xs font-bold block leading-tight truncate">{trans.label}</span>
+                        <span className="text-xs font-bold block leading-tight break-words">{trans.label}</span>
                         <span className={`text-[9px] block leading-tight mt-0.5 ${isSelected ? 'text-stone-200' : 'text-stone-400'}`}>
                           {trans.desc}
                         </span>

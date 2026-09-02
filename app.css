@@ -14,15 +14,15 @@
 @import 'tailwindcss';
 
 @theme {
-  --color-primary: #FDE047;
-  --color-primary-hover: #FACC15;
-  --color-primary-content: #422006;
-  --color-herb: #15803d;
-  --color-herb-light: #DCFCE7;
-  --color-herb-mint: #BBF7D0;
+  --color-primary: #174F35;
+  --color-primary-hover: #0E3826;
+  --color-primary-content: #DFF36C;
+  --color-herb: #174F35;
+  --color-herb-light: #E8F1E9;
+  --color-herb-mint: #DFF36C;
   --font-sans: "Plus Jakarta Sans", sans-serif;
   --font-display: "Space Grotesk", sans-serif;
-  --shadow-soft: 0 20px 40px -4px rgba(253, 224, 71, 0.15), 0 8px 16px -4px rgba(0, 0, 0, 0.05);
+  --shadow-soft: 0 20px 40px -4px rgba(23, 79, 53, 0.15), 0 8px 16px -4px rgba(0, 0, 0, 0.05);
   --animate-pulse-slow: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 

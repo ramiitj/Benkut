@@ -1161,7 +1161,15 @@ export const VoiceAgentShell: React.FC = () => {
 
   return (
     <main id="voice-agent-shell-root" className="h-[100dvh] max-h-[100dvh] bg-[#F5F7F3] text-[#17231C] font-sans flex flex-col justify-between select-none relative overflow-hidden">
-      
+
+      {/* Quiet decorative wash, matching the landing page's hero treatment -
+          ties the two into one visual identity without adding any visible
+          clutter to a screen that's meant to be read at a glance. */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -top-32 -right-24 w-[420px] h-[420px] rounded-full bg-[#DFF36C]/15 blur-3xl z-0"
+      />
+
       {/* 1. Ultra-Clean, Collision-Free Fixed Header */}
       <header
         id="voice-shell-header"
@@ -1400,7 +1408,7 @@ export const VoiceAgentShell: React.FC = () => {
         {/* Spoken Response & Main Insight Card */}
         <div
           id="voice-spoken-reply-card"
-          className="w-full max-w-lg bg-white rounded-3xl p-4 sm:p-5 shadow-lg border border-[#DFE5DF] text-left transition-all space-y-3 mt-2"
+          className="w-full max-w-lg bg-white rounded-3xl p-4 sm:p-5 shadow-xl shadow-[#174F35]/5 border border-[#DFE5DF] text-left transition-all space-y-3 mt-2 relative z-10"
         >
           {/* Header Row */}
           <div className="flex items-center justify-between border-b border-stone-100 pb-2">

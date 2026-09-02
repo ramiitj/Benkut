@@ -22,7 +22,7 @@ const Branding: React.FC = () => {
                         <span className="text-[10px] font-bold uppercase">Upload Logo</span>
                      </div>
                      <div className="aspect-square border-2 border-stone-200 rounded-xl relative bg-stone-50 flex items-center justify-center">
-                        <div className="w-16 h-16 bg-primary rounded-lg flex items-center justify-center"><span className="material-symbols-outlined text-2xl font-bold">skillet</span></div>
+                        <div className="w-16 h-16 bg-primary text-primary-content rounded-lg flex items-center justify-center"><span className="material-symbols-outlined text-2xl font-bold">skillet</span></div>
                         <div className="absolute top-2 right-2 bg-green-500 text-white rounded-full p-0.5 scale-75"><span className="material-symbols-outlined text-sm">check</span></div>
                      </div>
                   </div>
@@ -34,14 +34,14 @@ const Branding: React.FC = () => {
                         <label className="text-sm font-bold mb-2 block">Primary Color</label>
                         <div className="flex items-center gap-3">
                            <div className="w-12 h-12 rounded-lg bg-primary border border-stone-200"></div>
-                           <input type="text" defaultValue="#FDE047" className="flex-1 rounded-lg border-stone-200 font-mono text-sm bg-stone-50" />
+                           <input type="text" defaultValue="#174F35" className="flex-1 rounded-lg border-stone-200 font-mono text-sm bg-stone-50" />
                         </div>
                      </div>
                      <div>
                         <label className="text-sm font-bold mb-2 block">Secondary Color</label>
                         <div className="flex items-center gap-3">
                            <div className="w-12 h-12 rounded-lg bg-herb-mint border border-stone-200"></div>
-                           <input type="text" defaultValue="#BBF7D0" className="flex-1 rounded-lg border-stone-200 font-mono text-sm bg-stone-50" />
+                           <input type="text" defaultValue="#DFF36C" className="flex-1 rounded-lg border-stone-200 font-mono text-sm bg-stone-50" />
                         </div>
                      </div>
                   </div>
@@ -59,12 +59,12 @@ const Branding: React.FC = () => {
                         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-20 h-5 bg-stone-800 rounded-b-xl z-10"></div>
                         <div className="p-4 pt-10 flex flex-col h-full">
                            <div className="flex items-center gap-2 mb-6">
-                              <div className="w-6 h-6 bg-primary rounded flex items-center justify-center"><span className="material-symbols-outlined text-[10px]">skillet</span></div>
-                              <span className="text-[10px] font-black uppercase">CookCoach</span>
+                              <div className="w-6 h-6 bg-primary text-primary-content rounded flex items-center justify-center"><span className="material-symbols-outlined text-[10px]">skillet</span></div>
+                              <span className="text-[10px] font-black uppercase">Benkut</span>
                            </div>
                            <div className="w-full aspect-video bg-stone-100 rounded-lg mb-4 bg-cover bg-center" style={{backgroundImage: 'url(https://loremflickr.com/200/100/food,cooking)'}}></div>
                            <h3 className="font-bold text-lg leading-none mb-4">What are you cooking?</h3>
-                           <button className="w-full py-2 bg-primary text-xs font-bold rounded-lg shadow-sm mt-auto">Start Recipe</button>
+                           <button className="w-full py-2 bg-primary text-primary-content text-xs font-bold rounded-lg shadow-sm mt-auto">Start Recipe</button>
                         </div>
                      </div>
                   </div>
