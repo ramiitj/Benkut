@@ -46,7 +46,7 @@ export const Governance: React.FC = () => {
       </header>
 
       {/* Section Tabs */}
-      <div className="flex border-b border-stone-200 bg-stone-50 overflow-x-auto px-4 sm:px-8 gap-1 shrink-0">
+      <nav aria-label="Governance sections" className="flex border-b border-stone-200 bg-stone-50 overflow-x-auto px-4 sm:px-8 gap-1 shrink-0">
         {sections.map(s => (
           <button
             key={s}
@@ -63,7 +63,7 @@ export const Governance: React.FC = () => {
             )}
           </button>
         ))}
-      </div>
+      </nav>
 
       {/* Main Content Area */}
       <main className="flex-1 overflow-y-auto p-6 md:p-10">
